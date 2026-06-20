@@ -245,6 +245,9 @@ async function refreshList() {
     li.innerHTML = `
       <div class="row1">
         <span class="name">${escapeHtml(j.project_name)}</span>
+        ${j.status === "queued" && j.queue_position
+          ? `<span class="queue-badge" title="队列位置（前面还有 ${j.queue_position - 1} 个 job）">#${j.queue_position}</span>`
+          : ''}
         <span class="status-pill status-${j.status}">${j.status}</span>
       </div>
       <div class="meta">
@@ -312,6 +315,8 @@ function handleEvent(type, payload) {
   } else if (type === "status") {
     $("#detail-status").textContent = payload.status;
     $("#detail-status").className = "status-pill status-" + payload.status;
+    // 状态变了：刷新列表以更新其他 queued job 的 queue_position 和 status pill
+    refreshList().catch(() => {});
   } else if (type === "tool") {
     appendTimeline({
       type: "tool",
@@ -341,6 +346,9 @@ function renderDetail(j) {
       <h2>${escapeHtml(j.project_name)}</h2>
       <div class="right">
         <span class="sse-indicator" id="sse-indicator"></span>
+        ${j.status === "queued" && j.queue_position
+          ? `<span class="queue-badge" title="队列位置（前面还有 ${j.queue_position - 1} 个 job）">⏳ 前面还有 ${j.queue_position - 1} 位 · 您是 #${j.queue_position}</span>`
+          : ''}
         <span class="status-pill status-${j.status}" id="detail-status">${j.status}</span>
         ${j.status === "queued" || j.status === "running"
           ? '<button class="danger" id="cancel-btn">取消</button>'
