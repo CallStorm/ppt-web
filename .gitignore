@@ -8,6 +8,9 @@ jobs.db
 jobs.db-journal
 jobs.db-wal
 jobs.db-shm
+# env 文件：放 JWT secret、DB_URL 等敏感/部署相关配置
+.env
+.env.local
 # Phase 2: per-user data (uploads, projects, etc.)
 data/
 # ppt-master 用户项目产物（按需保留）

@@ -19,14 +19,49 @@ cd ppt-web
 python3 -m venv .venv
 .venv/bin/pip install -r phase1/requirements.txt
 
-# 3. 启动 Web 服务
+# 3.（可选）配 .env
+cp .env.example .env
+# 编辑 .env 设 DB_URL / JWT_SECRET 等
+
+# 4. 启动 Web 服务
 .venv/bin/uvicorn phase1.server:app --host 127.0.0.1 --port 8765
 
-# 4. 浏览器打开
+# 5. 浏览器打开
 open http://127.0.0.1:8765/
 ```
 
 第一次启动会自动跑 DB 迁移（`v1→v2→v3`）。
+
+## 数据库
+
+**默认 SQLite**（`./jobs.db`，零依赖，适合本地开发）。
+**生产推荐 MySQL**（或 Postgres），通过 `DB_URL` 环境变量切：
+
+```bash
+# 本地起一个 MySQL 8 docker
+docker run -d --name ppt-mysql \
+  -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=pptweb \
+  -e MYSQL_USER=pptweb \
+  -e MYSQL_PASSWORD=pptweb \
+  -v ppt-mysql-data:/var/lib/mysql \
+  mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+# 切到 MySQL 启动
+DB_URL="mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4" \
+  .venv/bin/uvicorn phase1.server:app
+```
+
+支持的 URL scheme：
+
+| 驱动 | URL 前缀 | 备注 |
+|---|---|---|
+| SQLite（默认） | `sqlite:///./jobs.db` | 本地零依赖 |
+| MySQL | `mysql+pymysql://…` | 需 `pip install pymysql`；库字符集 `utf8mb4` |
+| Postgres | `postgresql+psycopg2://…` | 需 `pip install psycopg2-binary` |
+
+迁移（`v1→v2→v3`）和 PRAGMA（WAL）都做了 DB 类型判断，SQLite 本地开发 + MySQL 部署可以无缝切换。
 
 ## 8 点确认开关
 
@@ -55,8 +90,7 @@ git add ppt-master
 git commit -m "chore: bump ppt-master to <version>"
 ```
 
-本仓的 `.gitmodules` 指向本地 bare 仓 `~/Developer/personal/personal-git/ppt-master.git`。
-如要推到 GitHub，把 bare 仓先 push 上去，再把 `.gitmodules` 里的 URL 改成 https URL 提交一次。
+本仓的 `.gitmodules` 指向 `https://github.com/CallStorm/ppt-master.git`（fork）。
 
 > ⚠️ **clone 时一定要带 `--recursive`**，否则 `ppt-master/` 是空目录。
 
@@ -66,6 +100,7 @@ git commit -m "chore: bump ppt-master to <version>"
 ppt-web/
 ├── DESIGN.md              # 整体设计稿
 ├── README.md              # 本文件
+├── .env.example           # 环境变量示例（cp 成 .env 用）
 ├── .gitignore
 ├── phase0/                # CLI 调试壳
 │   ├── orchestrator.py
