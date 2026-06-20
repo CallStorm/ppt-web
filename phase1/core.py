@@ -24,6 +24,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,6 +41,18 @@ from phase1.paths import project_root_for
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
 PPTMASTER = PROJECT_ROOT / "ppt-master"
+
+# ── Docker 化执行（方案 2）────────────────────────────────────
+# 每个 job 起一个临时容器跑 claude，--rm 自动销毁。
+# 关掉 = 走老路直接 host 上 Popen("claude ...", cwd=PPTMASTER)，适合本地开发
+# 打开 = uvicorn 通过 `docker run` 起容器，per-job 隔离
+USE_DOCKER_RUNNER: bool = os.getenv("USE_DOCKER_RUNNER", "false").strip().lower() in ("1", "true", "yes", "on")
+DOCKER_RUNNER_IMAGE: str = os.getenv("DOCKER_RUNNER_IMAGE", "ppt-runner:latest")
+DOCKER_RUNNER_NETWORK: str = os.getenv("DOCKER_RUNNER_NETWORK", "ppt-isolated")
+DOCKER_RUNNER_MEMORY: str = os.getenv("DOCKER_RUNNER_MEMORY", "4g")
+DOCKER_RUNNER_CPUS: str = os.getenv("DOCKER_RUNNER_CPUS", "2")
+# 单 job 容器最长跑多久（秒），超时强杀。claude 生成 10 页通常 5-15 分钟
+DOCKER_RUNNER_TIMEOUT_S: int = int(os.getenv("DOCKER_RUNNER_TIMEOUT_S", "1800"))
 
 # ── 八点确认开关 ─────────────────────────────────────────────────
 # run_sync 收到 `require_confirm` 参数（来自 Job.require_confirm，由 UI 勾选）。
@@ -129,19 +142,34 @@ def build_initial_prompt(
     project_name: str,
     project_root: Path,
     upload_paths: list[str] | None = None,
+    *,
+    mount_path: str | None = None,
+    host_prefix: str | None = None,
 ) -> str:
     """第一次启动时给 agent 的指令。
 
     Phase 2 新增：
       - 告诉 agent 它的 per-user project_root（`init <name> --dir <project_root>` 用）
       - 列出用户已上传的素材文件 + 建议的 import-sources --copy 命令
+
+    docker 模式：传 `mount_path`（如 "/work"）+ `host_prefix`（如 host 上的
+    `data/users/<uid>/` 绝对路径），prompt 里所有 host 路径会被替换为容器内路径。
+    例：/Users/x/data/users/U1/projects/job_id → /work/projects/job_id
+        /Users/x/data/users/U1/uploads/job_id/f.pdf → /work/uploads/job_id/f.pdf
     """
+    if mount_path and host_prefix:
+        # docker 模式：把 prompt 里所有 host 路径换成容器内路径
+        project_root_str = str(project_root).replace(host_prefix, mount_path, 1)
+        if upload_paths:
+            upload_paths = [p.replace(host_prefix, mount_path) for p in upload_paths]
+    else:
+        project_root_str = str(project_root)
     parts = [
         "请先用 read_file 读取 skills/ppt-master/SKILL.md，然后严格按其工作流执行，"
         "为以下内容生成一份 PPT（格式 PPT 16:9，8-10 页，自由设计）。",
         "",
         f"项目目录名使用: {project_name}",
-        f"你的项目根目录（用 --dir 标志传给 project_manager init）: {project_root}",
+        f"你的项目根目录（用 --dir 标志传给 project_manager init）: {project_root_str}",
         "",
         "重要约束（Phase 0 验证环境）：",
         "1. 对于八点确认（Step 4），使用【聊天确认】方式——直接在回复里列出推荐方案并停下等我的确认，"
@@ -171,24 +199,150 @@ def build_initial_prompt(
 
 # ── 子进程 stream-json ──────────────────────────────────────────────
 
+def _split_claude_args(args: list[str]) -> tuple[str, list[str]]:
+    """把 args 拆成 (prompt_text, extra_args)。
+
+    claude CLI 的 -p <prompt> 必须单独成一项，从 args 抽出来。
+    其余 flag（--output-format/--verbose/--resume/--dangerously-skip-permissions 等）
+    原样返回，由 entrypoint.sh 拼回去。
+    """
+    prompt_text = ""
+    extra: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "-p" and i + 1 < len(args):
+            prompt_text = args[i + 1]
+            i += 2
+        else:
+            extra.append(args[i])
+            i += 1
+    return prompt_text, extra
+
+
+def _build_docker_run_cmd(
+    args: list[str],
+    project_root: Path,
+    job_id: str | None,
+) -> tuple[list[str], str, str]:
+    """构造 docker run 命令，env 透传 ANTHROPIC_* + PROMPT + EXTRA。
+
+    容器内：/opt/ppt-master 是 ppt-master 源码（image 内），/work 是 host 的
+    `data/users/<uid>/` 整目录（包含 projects/<job_id>/ 和 uploads/<job_id>/）。
+    这样 ppt-master 的 project_manager --dir 写到 /work/projects/...，agent
+    import-sources 也能从 /work/uploads/... 读到用户上传。
+
+    返回 (cmd, mount_path, host_prefix)，后两个用于把 prompt 里的 host 路径
+    翻译成容器内路径。
+    """
+    prompt_text, extra_args = _split_claude_args(args)
+    container_name = (
+        f"ppt-job-{job_id}" if job_id
+        else f"ppt-job-{uuid.uuid4().hex[:8]}"
+    )
+
+    # 整个 user_dir 挂到 /work（包含 projects/<job_id> + uploads/<job_id>）
+    # user_dir = project_root.parent.parent
+    #   project_root = data/users/<uid>/projects/<job_id>
+    #   parent       = data/users/<uid>/projects
+    #   parent.parent= data/users/<uid>
+    user_dir = project_root.resolve().parent.parent
+    mount_path = "/work"
+    host_prefix = str(user_dir)
+
+    cmd: list[str] = [
+        "docker", "run", "--rm", "-i",
+        "--name", container_name,
+        "--memory", DOCKER_RUNNER_MEMORY,
+        "--cpus", DOCKER_RUNNER_CPUS,
+        "--network", DOCKER_RUNNER_NETWORK,
+        "-v", f"{user_dir}:{mount_path}",
+        "-w", "/opt/ppt-master",
+        "-e", f"PROMPT={prompt_text}",
+        "-e", f"JOB_ID={job_id or ''}",
+    ]
+    if extra_args:
+        cmd.extend(["-e", f"CLAUDE_EXTRA_ARGS={' '.join(extra_args)}"])
+
+    # 透传 ANTHROPIC_* 等认证 env。
+    # CLAUDE_CODE_EXECPATH 不传：host 上的路径（Mac /opt/homebrew/...）
+    # 在 Linux 容器里没意义，会让 claude 找不到自己。
+    for k, v in os.environ.items():
+        if k == "CLAUDE_CODE_EXECPATH":
+            continue
+        if k.startswith("ANTHROPIC_"):
+            cmd.extend(["-e", f"{k}={v}"])
+
+    cmd.append(DOCKER_RUNNER_IMAGE)
+    return cmd, mount_path, host_prefix
+
+
+def _start_docker_watchdog(
+    cancel_event: threading.Event,
+    timeout_s: int,
+    container_name: str | None,
+) -> threading.Timer:
+    """起一个 watchdog：超时后 set cancel_event，并 docker stop 容器（如果还在）。"""
+    def _fire():
+        log.warning(
+            "docker runner timeout %ds reached for %s; cancelling",
+            timeout_s, container_name or "?",
+        )
+        cancel_event.set()
+        # docker stop 容器（如果还在跑），给 30s 优雅退出，再 SIGKILL
+        if container_name:
+            try:
+                subprocess.run(
+                    ["docker", "stop", "-t", "30", container_name],
+                    timeout=35, check=False, capture_output=True,
+                )
+            except Exception as e:
+                log.warning("docker stop failed: %s", e)
+    t = threading.Timer(timeout_s, _fire)
+    t.daemon = True
+    t.start()
+    return t
+
+
 def stream_claude(
     args: list[str],
     on_event: Callable[[dict], None],
     cancel_event: threading.Event | None = None,
     proc_holder: list | None = None,
+    project_root: Path | None = None,
+    job_id: str | None = None,
 ) -> dict:
     """启动 claude CLI（stream-json），逐行解析事件，调用 on_event(event_dict)。
+
+    USE_DOCKER_RUNNER=true 时改走 docker run（每 job 一个容器，自动 --rm）。
+    否则 host 上 Popen("claude ...")，cwd=PPTMASTER（本地开发用）。
 
     返回最终的 result 事件（含 session_id / cost / result 文本）。
     同步函数（Web 侧用 asyncio.to_thread 包装）。
 
     cancel_event: 外部可 set() 来请求取消；本函数会 terminate 子进程并退出循环。
     proc_holder: 若传一个 list，函数会把 Popen 引用放进去，便于外部做更细的控制。
+    project_root: docker 模式必传（要 mount 进容器）
+    job_id: docker 模式传（用于容器名 + 日志关联）
     """
-    env = os.environ.copy()
+    if USE_DOCKER_RUNNER:
+        if project_root is None:
+            raise ValueError("USE_DOCKER_RUNNER=true 需要 project_root 参数")
+        cmd, _mount_path, _host_prefix = _build_docker_run_cmd(args, project_root, job_id)
+        cwd = None  # docker run 不需要 host cwd
+        env = None  # 走 _build_docker_run_cmd 里的 -e
+        container_name = (
+            f"ppt-job-{job_id}" if job_id
+            else cmd[cmd.index("--name") + 1]
+        )
+    else:
+        cmd = ["claude", *args]
+        cwd = str(PPTMASTER)
+        env = os.environ.copy()
+        container_name = None
+
     proc = subprocess.Popen(
-        ["claude", *args],
-        cwd=str(PPTMASTER),
+        cmd,
+        cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -197,6 +351,13 @@ def stream_claude(
     )
     if proc_holder is not None:
         proc_holder.append(proc)
+
+    # Docker 模式起 watchdog：超时后 cancel + docker stop
+    watchdog: threading.Timer | None = None
+    if USE_DOCKER_RUNNER and cancel_event is not None:
+        watchdog = _start_docker_watchdog(
+            cancel_event, DOCKER_RUNNER_TIMEOUT_S, container_name,
+        )
 
     final_result: dict = {}
     last_assistant_text = ""
@@ -263,6 +424,8 @@ def stream_claude(
             cancelled = True
         proc.wait()
     finally:
+        if watchdog is not None:
+            watchdog.cancel()
         if cancelled and proc.poll() is None:
             proc.terminate()
             try:
@@ -292,6 +455,7 @@ def run_sync(
     cancel_event: threading.Event | None = None,
     proc_holder: list | None = None,
     require_confirm: bool = False,
+    job_id: str | None = None,
 ) -> dict:
     """组装 args → 调 stream_claude → 判 paused/done → 返回结果 dict。
 
@@ -303,7 +467,17 @@ def run_sync(
       False → 自动 --resume + 喂 AUTO_CONFIRM_TEXT 继续（除非 env SKIP_EIGHT_CONFIRM 关掉）
               全局 env `SKIP_EIGHT_CONFIRM=true` 仍然可以强制覆盖 → 永远自动 resume。
     """
-    full_prompt = build_initial_prompt(prompt, project_name, project_root, upload_paths=upload_paths)
+    # docker 模式：prompt 里要替换 host 路径为容器内路径
+    build_kwargs: dict = {}
+    if USE_DOCKER_RUNNER:
+        user_dir = project_root.resolve().parent.parent
+        build_kwargs["mount_path"] = "/work"
+        build_kwargs["host_prefix"] = str(user_dir)
+    full_prompt = build_initial_prompt(
+        prompt, project_name, project_root,
+        upload_paths=upload_paths,
+        **build_kwargs,
+    )
     args = [
         "-p", full_prompt,
         "--output-format", "stream-json",
@@ -314,7 +488,11 @@ def run_sync(
     on_event({"kind": "status", "status": "running"})
 
     try:
-        result = stream_claude(args, on_event, cancel_event=cancel_event, proc_holder=proc_holder)
+        result = stream_claude(
+            args, on_event,
+            cancel_event=cancel_event, proc_holder=proc_holder,
+            project_root=project_root, job_id=job_id,
+        )
     except Exception as e:
         on_event({"kind": "error", "message": f"claude CLI 失败: {e}"})
         return {
@@ -376,6 +554,7 @@ def run_sync(
                 resume_result = stream_claude(
                     resume_args, on_event,
                     cancel_event=cancel_event, proc_holder=proc_holder,
+                    project_root=project_root, job_id=job_id,
                 )
             except Exception as e:
                 on_event({"kind": "error", "message": f"auto-resume claude CLI 失败: {e}"})
@@ -440,6 +619,7 @@ def resume_sync(
     *,
     cancel_event: threading.Event | None = None,
     proc_holder: list | None = None,
+    job_id: str | None = None,
 ) -> dict:
     """注入用户确认继续 `--resume <session_id>`。返回同 run_sync。
 
@@ -457,7 +637,11 @@ def resume_sync(
     on_event({"kind": "status", "status": "running"})
 
     try:
-        result = stream_claude(args, on_event, cancel_event=cancel_event, proc_holder=proc_holder)
+        result = stream_claude(
+            args, on_event,
+            cancel_event=cancel_event, proc_holder=proc_holder,
+            project_root=project_root, job_id=job_id,
+        )
     except Exception as e:
         on_event({"kind": "error", "message": f"claude CLI 失败: {e}"})
         return {
@@ -698,6 +882,7 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                 cancel_event=_active_cancel_event,
                 proc_holder=_active_proc_holder,
                 require_confirm=require_confirm,
+                job_id=job_id,
             )
             # 写 job 表
             with SessionLocal() as s:
@@ -783,6 +968,7 @@ async def resume_job(job_id: str, confirm: str) -> None:
                 resume_sync, session_id, confirm, project_root, project_name, on_event,
                 cancel_event=_active_cancel_event,
                 proc_holder=_active_proc_holder,
+                job_id=job_id,
             )
             with SessionLocal() as s:
                 j = s.get(DbJob, job_id)

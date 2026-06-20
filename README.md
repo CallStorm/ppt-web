@@ -63,6 +63,56 @@ DB_URL="mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4" \
 
 迁移（`v1→v2→v3`）和 PRAGMA（WAL）都做了 DB 类型判断，SQLite 本地开发 + MySQL 部署可以无缝切换。
 
+## Job 隔离：每 job 一个 Docker 容器
+
+每个生成任务在一个临时容器里跑，跑完自动销毁（`--rm`）。**这是方案 2（推荐给多用户/对外场景）**。
+
+```bash
+# 1. 一次性 build 镜像
+bash docker/ppt-runner/build.sh
+# 等 5-10 分钟，build 完一个 ~1.5GB 的 ppt-runner:latest 镜像
+
+# 2. 启用 docker runner 启动
+export USE_DOCKER_RUNNER=true
+.venv/bin/uvicorn phase1.server:app
+```
+
+镜像里包含：`python 3.11 + claude CLI + ppt-master 源码 + ppt-master 依赖 + 中英文字体`。每 job 起一个容器，per-user 写目录 mount 进 `/work`，claude 退出或 30 分钟超时后自动销毁。
+
+**架构**：
+
+```
+uvicorn 进程（API 层）
+  └─ docker run --rm -i \
+       --name ppt-job-<job_id> \
+       -v data/users/<uid>/projects/<job_id>/:/work \
+       -e PROMPT=... -e JOB_ID=... \
+       -e ANTHROPIC_AUTH_TOKEN=... \
+       --memory=4g --cpus=2 --network=ppt-isolated \
+       ppt-runner:latest
+```
+
+**关掉 = 走老路**（host 上直接 Popen `claude`，cwd=`ppt-master/`，适合本地快速开发）：
+
+```bash
+# 不设 USE_DOCKER_RUNNER，或：
+unset USE_DOCKER_RUNNER
+.venv/bin/uvicorn phase1.server:app
+```
+
+**可调环境变量**（都列在 `.env.example`）：
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `USE_DOCKER_RUNNER` | `false` | 是否走 docker |
+| `DOCKER_RUNNER_IMAGE` | `ppt-runner:latest` | 镜像名 |
+| `DOCKER_RUNNER_NETWORK` | `ppt-isolated` | bridge 网络（用 `build.sh` 自动建） |
+| `DOCKER_RUNNER_MEMORY` | `4g` | 单 job 内存上限 |
+| `DOCKER_RUNNER_CPUS` | `2` | 单 job CPU 份额 |
+| `DOCKER_RUNNER_TIMEOUT_S` | `1800` | 单 job 超时（秒），超时强杀 |
+
+> ⚠️ Docker 模式下 ppt-master 子脚本的硬编码端口问题**自动消失**（每个容器独立 netns）。
+
 ## 8 点确认开关
 
 新建任务表单里有个 checkbox：**「需要 8 点确认」**。

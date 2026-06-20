@@ -1,0 +1,54 @@
+# 跟 .gitignore 类似但更激进——避免 build context 太大 / 误拷运行时数据
+# 路径相对于 build context（docker build 命令所在目录）
+
+# Python 虚拟环境 + 缓存
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 运行时数据（DB / 用户数据 / 日志 / 临时）
+data/
+jobs.db
+jobs.db-*
+*.log
+.phase0/
+.phase0_preview/
+.phase0_*.log
+.env
+.env.local
+
+# Git / IDE
+.git/
+.gitignore
+.gitmodules
+.gitkeep
+.idea/
+.vscode/
+.DS_Store
+
+# 文档（不进镜像）
+*.md
+!ppt-master/**/*.md
+README.md
+DESIGN.md
+
+# Docker 自己（防递归，但 ppt-runner 镜像自己要的 Dockerfile + entrypoint 要放行）
+Dockerfile
+.dockerignore
+docker/
+!docker/ppt-runner/Dockerfile
+!docker/ppt-runner/entrypoint.sh
+
+# phase2/3 文档不进
+phase2/REPORT.md
+phase1/REPORT.md
+phase0/REPORT.md
+phase0/README.md
+
+# 测试脚本
+_smoke.py
