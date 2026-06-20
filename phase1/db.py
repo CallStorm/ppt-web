@@ -141,6 +141,27 @@ def migrate_v2_to_v3() -> bool:
     return True
 
 
+def migrate_v3_to_v4() -> bool:
+    """v3 → v4: jobs 表加 pending_confirm TEXT NULL 列。
+
+    dispatcher 用来识别「这是 resume，不是新 run」——之前 in-memory dict，server
+    crash 后 confirm 丢失，resume 会被当成新 run 跑一遍（浪费成本+丢失 session）。
+    持久化后，重启 dispatcher 仍能正确路由。
+    """
+    if not _has_users_table():
+        return False
+    if not inspect(engine).has_table("jobs"):
+        return False
+    if _has_column("jobs", "pending_confirm"):
+        return False
+    log.warning("migrating DB v3 -> v4 (adding jobs.pending_confirm)")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "ALTER TABLE jobs ADD COLUMN pending_confirm TEXT NULL"
+        )
+    return True
+
+
 def init_db() -> None:
     """建表（已存在则忽略）。幂等。"""
     Base.metadata.create_all(engine)

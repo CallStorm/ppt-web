@@ -60,6 +60,9 @@ class Job(Base):
     # agent 在 stage 3 end_turn 时直接自动 resume 出 pptx，不弹确认面板。
     # 老 job（迁移前创建的）会被 db.migrate_v2_to_v3() ALTER 加上，默认 0。
     require_confirm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # dispatcher 用来区分「新 run」还是「resume」：非 NULL = 是 resume 的确认文本。
+    # 之前用 in-memory dict，server crash 就丢——现在持久化到 DB，重启后 dispatcher 仍能识别。
+    pending_confirm: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
