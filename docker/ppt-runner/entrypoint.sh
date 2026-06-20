@@ -23,12 +23,10 @@ fi
 # 注：claude CLI 没有 --dir flag。ppt-master 的 project_manager.py init <name> --dir <path>
 # 才是用 --dir 的地方，agent 读 prompt 知道要传 /work 给 project_manager。
 # claude 的 cwd 在容器里是 /opt/ppt-master（WORKDIR 设定），可以读到 skills/ppt-master/SKILL.md。
+# 只放 entrypoint 自己控制的 flag（--print + resume）。stream-json / verbose /
+# dangerous skip 等全部由 server 通过 CLAUDE_EXTRA_ARGS 传入，避免双写。
 ARGS=(
   --print
-  --output-format=stream-json
-  --input-format=text
-  --verbose
-  --dangerously-skip-permissions
 )
 
 if [ "${RESUME_SESSION:-0}" = "1" ] && [ -n "${RESUME_SESSION_ID:-}" ]; then
