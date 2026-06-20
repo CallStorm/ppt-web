@@ -30,11 +30,12 @@ from typing import Any, Callable
 
 log = logging.getLogger("phase1.core")
 
-from phase1.db import SessionLocal, init_db
+from phase1.db import SessionLocal, init_db, _is_sqlite
 from phase1.models import Event as DbEvent
 from phase1.models import Job as DbJob
 from phase1.models import User
-from phase1.paths import project_root_for
+from phase1.paths import project_root_for, uploads_dir_for
+from sqlalchemy import literal_column
 
 # ── 路径 ──────────────────────────────────────────────────────────────
 # phase1/core.py 位于 phase1/，PROJECT_ROOT 是其父目录 = ppt-web/
@@ -129,6 +130,36 @@ def find_pptx(root: Path) -> Path | None:
         return None
     hits = sorted(root.rglob("*.pptx"), key=lambda p: p.stat().st_mtime, reverse=True)
     return hits[0] if hits else None
+
+
+def _project_snapshot(root: Path) -> tuple:
+    """给 project_root 拍「文件指纹」——检测 agent 是否有实质进展。
+
+    返回 (file_count, total_size, max_mtime, sorted_names)：
+      - file_count：文件总数（写新文件 / 删旧文件都会变）
+      - total_size：所有文件 size 加起来（编辑 SVG 会变）
+      - max_mtime：最新 mtime
+      - sorted_names：所有文件的相对路径排序后的 tuple（防漏文件）
+
+    auto-resume 时如果 snapshot 完全没变 + agent 又说"已完成" →
+    agent 很可能在空转 / 撒谎，立即 bail 不再浪费钱。
+    """
+    if not root or not root.exists():
+        return (0, 0, 0.0, ())
+    files = [p for p in root.rglob("*") if p.is_file()]
+    total_size = 0
+    max_mtime = 0.0
+    names = []
+    for p in files:
+        try:
+            st = p.stat()
+            total_size += st.st_size
+            if st.st_mtime > max_mtime:
+                max_mtime = st.st_mtime
+            names.append(str(p.relative_to(root)))
+        except OSError:
+            pass
+    return (len(files), total_size, max_mtime, tuple(sorted(names)))
 
 
 def build_initial_prompt(
@@ -261,11 +292,17 @@ def _build_docker_run_cmd(
     # 透传 ANTHROPIC_* 等认证 env。
     # CLAUDE_CODE_EXECPATH 不传：host 上的路径（Mac /opt/homebrew/...）
     # 在 Linux 容器里没意义，会让 claude 找不到自己。
+    # 透传所有 ANTHROPIC_* env（含 BASE_URL / MODEL / DEFAULT_*_MODEL 等）。
     for k, v in os.environ.items():
         if k == "CLAUDE_CODE_EXECPATH":
             continue
         if k.startswith("ANTHROPIC_"):
             cmd.extend(["-e", f"{k}={v}"])
+    # third-party 代理（minimaxi/openrouter/azure 等）通常只用 ANTHROPIC_AUTH_TOKEN，
+    # 但 claude CLI 默认只认 ANTHROPIC_API_KEY。容器里没 ~/.claude/ credentials，
+    # 所以手动 alias 一下，确保容器里的 claude 一定能找到 key。
+    if "ANTHROPIC_AUTH_TOKEN" in os.environ and "ANTHROPIC_API_KEY" not in os.environ:
+        cmd.extend(["-e", f"ANTHROPIC_API_KEY={os.environ['ANTHROPIC_AUTH_TOKEN']}"])
 
     cmd.append(DOCKER_RUNNER_IMAGE)
     return cmd, mount_path, host_prefix
@@ -525,7 +562,9 @@ def run_sync(
     # 兼容第三方 API（minimaxi 等）的 stop_reason 行为：agent 主动停下等用户时
     # 官方 anthropic 返回 "end_turn"，但有些代理返回 None。一律当"主动停下"处理。
     STOP_OK = ("end_turn", None)
+    no_progress_bail = False  # agent 没产生新文件 → bail，触发 refund
     if not pptx and stop_reason in STOP_OK and session_id:
+        prev_snapshot = _project_snapshot(project_root)
         auto_round = 0
         while (
             not pptx
@@ -582,6 +621,23 @@ def run_sync(
             stop_reason = resume_result.get("stop_reason", "end_turn")
             pptx = find_pptx(project_root)
             project_dir = resolve_project_dir(project_name, root=project_root) or project_dir
+
+            # 进展检测：snapshot 完全没变 + 仍然没 pptx → agent 在空转 / 撒谎。
+            # 实测过：claude agent 把路径里的 user_id UUID 截断一位，然后说"导出完成 69KB"，
+            # 反复 3 轮 auto-resume 烧掉 ~$1.14 才认命。snapshot 不变 = 必 bail。
+            new_snapshot = _project_snapshot(project_root)
+            if not pptx and new_snapshot == prev_snapshot:
+                no_progress_bail = True
+                log.warning(
+                    "auto-resume round %d: project snapshot unchanged; agent not making progress; bail",
+                    auto_round,
+                )
+                on_event({
+                    "kind": "error",
+                    "message": f"auto-resume: no file changes after round {auto_round}; agent likely stuck or hallucinating",
+                })
+                break
+            prev_snapshot = new_snapshot
         log.info(
             "SKIP_EIGHT_CONFIRM finished after %d rounds: pptx=%s stop_reason=%s",
             auto_round, bool(pptx), stop_reason,
@@ -589,6 +645,10 @@ def run_sync(
 
     if pptx:
         status = "done"
+    elif no_progress_bail:
+        # auto-resume 检测到 snapshot 完全没变 → agent 在空转 / 撒谎。
+        # 标 failed + 触发 refund（不是用户 prompt 的问题，是 server 没识别出 agent 异常）
+        status = "failed"
     elif stop_reason in STOP_OK:
         # agent 主动停下但还没出 pptx = 暂停等确认
         status = "paused"
@@ -602,7 +662,13 @@ def run_sync(
         "pptx_path": str(pptx) if pptx else None,
         "cost_usd": cost,
         "last_agent_text": last_text,
-        "error_message": None if status != "failed" else f"stop_reason={stop_reason}",
+        "error_message": (
+            None if status != "failed" else
+            ("auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated"
+             if no_progress_bail else f"stop_reason={stop_reason}")
+        ),
+        # run_job 看这个标志决定是否 refund credit
+        "refund": no_progress_bail,
     }
     on_event({"kind": "status", "status": status})
     return final
@@ -694,7 +760,18 @@ def resume_sync(
 # 全局并发 semaphore + 事件 fanout（DB 写 + 推到所有订阅者 Queue）。
 
 MAX_CONCURRENT_JOBS: int = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))
-_active_sem: asyncio.Semaphore | None = None  # 懒初始化（asyncio.Semaphore 必须在 event loop 里建）
+# ── Activity watchdog ────────────────────────────────────
+# 跑 claude 可能因为 API 卡住 / 网络问题 hang 几个小时（实测过 3+ 小时）。
+# watchdog 每 WATCHDOG_INTERVAL_S 秒扫一次 running job，
+# 如果 updated_at 距今 > WATCHDOG_STALE_SECS 秒没动 → 判定卡死：
+#   - kill server 内存里持有的 claude 进程（_active_proc_holders）
+#   - pgrep 找孤儿 claude 进程（server reload 后内存丢的情况）也 kill
+#   - DB 改 failed + refund 1 credit + notify dispatcher 释放槽位
+WATCHDOG_STALE_SECS: int = int(os.getenv("WATCHDOG_STALE_SECS", "600"))    # 10 分钟没新 event
+WATCHDOG_INTERVAL_S: int = int(os.getenv("WATCHDOG_INTERVAL_S", "60"))     # 检查频率
+_watchdog_task: asyncio.Task | None = None
+# 并发由 dispatcher 统一调度（active_count() < MAX 时才拉起新 job）；
+# 不再需要 asyncio.Semaphore 等待。_active_job_ids 即并发真值。
 _active_job_ids: set[str] = set()
 _active_proc_holders: dict[str, list] = {}  # 放当前 Popen，供 cancel 用
 _active_cancel_events: dict[str, threading.Event] = {}
@@ -702,28 +779,378 @@ _subscribers: dict[str, list[asyncio.Queue]] = {}
 _seq_counters: dict[str, int] = {}
 _seq_locks: dict[str, threading.Lock] = {}
 
+# ── 真正队列化（dispatcher）────────────────────────────────────
+# HTTP 层不再 asyncio.create_task(run_job(...))；改成：
+#   1. Job 行 status=queued 入库
+#   2. notify_dispatcher() 唤醒后台循环
+#   3. 后台循环扫 queued jobs（FIFO），有 active_count() < MAX_CONCURRENT_JOBS
+#      时把下一个拉起来跑
+# 这样 HTTP 永远 201 + status=queued；capacity 满了就在 DB 排队等，跨重启可恢复。
+_dispatcher_task: asyncio.Task | None = None
+_dispatcher_event: asyncio.Event | None = None  # 懒初始化（asyncio.Event 必须在 event loop 里建）
+# resume 确认文本存 DB 的 Job.pending_confirm（v4 schema）。不在内存：server crash
+# 也能恢复，dispatcher 重启后仍能正确路由到 resume_job。
+# dispatcher 用 (status='queued' AND pending_confirm IS NOT NULL) 识别 resume job。
+
 
 def init_runtime() -> None:
-    """在 event loop 里调用一次：建表 + 建 asyncio.Semaphore。
+    """在 event loop 里调用一次：建表 + 建 asyncio.Event。
 
     注意：不要把"清理上次残留 job"放这里——run_job 热路径会再调一次，会把刚
     启动的 job 立刻标 failed。清理逻辑拆到 cleanup_stuck_jobs()，lifespan 单次调。
     """
-    global _active_sem
+    global _dispatcher_event
     init_db()
-    if _active_sem is None:
-        _active_sem = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    if _dispatcher_event is None:
+        _dispatcher_event = asyncio.Event()
 
 
 def cleanup_stuck_jobs() -> int:
-    """启动时把上次没跑完的 running/queued 标 failed。返回清理数量。"""
+    """启动时清理上次没跑完的 job。
+
+    - status=running：server 挂了肯定没在跑，标 failed
+    - status=queued：保留！dispatcher 重启后会捞起来跑（这是真正队列化的好处）
+
+    返回清理掉的 running 数量。
+    """
     with SessionLocal() as s:
-        stuck = s.query(DbJob).filter(DbJob.status.in_(["queued", "running"])).all()
-        for j in stuck:
+        running = s.query(DbJob).filter(DbJob.status == "running").all()
+        for j in running:
             j.status = "failed"
             j.error_message = "server restart interrupted your previous run"
         s.commit()
-        return len(stuck)
+        return len(running)
+
+
+# ── Activity watchdog ────────────────────────────────────
+# 跑 claude 可能因为 API 卡住 / 网络问题 hang 几个小时（实测过 3+ 小时）。
+# watchdog 每 WATCHDOG_INTERVAL_S 秒扫一次 running job，
+# 如果 updated_at 距今 > WATCHDOG_STALE_SECS 秒没动 → 判定卡死：
+#   - kill server 内存里持有的 claude 进程（_active_proc_holders）
+#   - pgrep 找孤儿 claude 进程（server reload 后内存丢的情况）也 kill
+#   - DB 改 failed + refund 1 credit + notify dispatcher 释放槽位
+
+
+def _kill_tracked_proc(job_id: str) -> bool:
+    """kill _active_proc_holders 里 server 自己持有的 claude 进程。返回是否 kill 成功。"""
+    holder = _active_proc_holders.get(job_id)
+    if not holder:
+        return False
+    proc = holder[0] if holder else None
+    if not proc:
+        return False
+    try:
+        if proc.poll() is None:
+            proc.kill()
+            log.warning("watchdog: killed tracked claude pid=%s for job %s", proc.pid, job_id)
+            return True
+    except Exception as e:
+        log.warning("watchdog: kill tracked proc failed for %s: %s", job_id, e)
+    return False
+
+
+def _kill_orphan_claude(project_dir_str: str) -> list[int]:
+    """pgrep 按 project_dir 路径找孤儿 claude 进程并 kill。
+
+    适用：server reload 后 _active_proc_holders 丢了，但 OS 里 claude 还在跑。
+    claude cmdline 包含 `--dir <project_root>`，用 `pgrep -f` 匹配。
+    """
+    killed = []
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", f"--dir.*{re.escape(project_dir_str)}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for pid_s in r.stdout.split():
+            try:
+                pid = int(pid_s)
+                os.kill(pid, 9)
+                killed.append(pid)
+                log.warning("watchdog: killed orphan claude pid=%s (matched project_dir)", pid)
+            except (ProcessLookupError, ValueError):
+                pass
+    except Exception as e:
+        log.warning("watchdog: pgrep failed: %s", e)
+    return killed
+
+
+def _sweep_stale_jobs() -> int:
+    """扫描 stale running jobs → kill + mark failed + refund + 通知 dispatcher。
+
+    返回处理数量。
+    """
+    # DB updated_at 用 server_default=func.now()（SQLite 上是 CURRENT_TIMESTAMP = UTC 字符串）。
+    # 用 SQL 直接做时间比较，避免 Python 端 naive vs aware 时区混淆：
+    #   - SQLite:  `datetime('now', '-600 seconds')`     → UTC 字符串
+    #   - MySQL:   `DATE_SUB(UTC_TIMESTAMP(), INTERVAL 600 SECOND)`
+    # 两个 DB 的 `updated_at` 列定义都是 naive（无时区），所以字符串/原生 dt 比较即可。
+    stale_ids: list[str] = []
+    threshold_seconds = WATCHDOG_STALE_SECS
+
+    with SessionLocal() as s:
+        if _is_sqlite():
+            cutoff_expr = literal_column(f"datetime('now', '-{threshold_seconds} seconds')")
+        else:
+            # MySQL / Postgres
+            cutoff_expr = literal_column(
+                f"DATE_SUB(UTC_TIMESTAMP(), INTERVAL {threshold_seconds} SECOND)"
+            )
+        stale = (
+            s.query(DbJob)
+            .filter(DbJob.status == "running", DbJob.updated_at < cutoff_expr)
+            .all()
+        )
+        for j in stale:
+            stale_ids.append(j.id)
+            killed_count = 0
+            # 1. kill server 自己持有的 proc
+            if _kill_tracked_proc(j.id):
+                killed_count += 1
+            # 2. 找孤儿（reload 后内存丢的情况）
+            if j.user_id:
+                try:
+                    project_dir = str(project_root_for(j.user_id, j.id))
+                    killed_count += len(_kill_orphan_claude(project_dir))
+                except Exception as e:
+                    log.warning("watchdog: project_dir lookup failed for %s: %s", j.id, e)
+            # 3. 改 status + refund（server / API 问题，不该用户承担）
+            j.status = "failed"
+            j.error_message = (
+                f"watchdog: no event for {WATCHDOG_STALE_SECS}s; "
+                f"killed {killed_count} claude process(es)"
+            )
+            if j.user_id:
+                u = s.get(User, j.user_id)
+                if u:
+                    u.quota_credits += 1
+                    log.info("watchdog: refund 1 credit to user %s (job %s)",
+                             j.user_id, j.id)
+        if stale:
+            s.commit()
+
+    # 4. 清 server 内部状态 + 通知 dispatcher（让下一个 queued job 顶上）
+    for jid in stale_ids:
+        _active_job_ids.discard(jid)
+        _active_proc_holders.pop(jid, None)
+        _active_cancel_events.pop(jid, None)
+        _enqueue_event(jid, "status", {"status": "failed"})
+
+    if stale_ids:
+        notify_dispatcher()
+        log.warning(
+            "watchdog: cleaned %d stale job(s) (threshold=%ds): %s",
+            len(stale_ids), WATCHDOG_STALE_SECS, stale_ids,
+        )
+    return len(stale_ids)
+
+
+async def _watchdog_loop() -> None:
+    """每 WATCHDOG_INTERVAL_S 秒跑一次 _sweep_stale_jobs。"""
+    log.info("watchdog loop running (interval=%ds, stale=%ds)",
+             WATCHDOG_INTERVAL_S, WATCHDOG_STALE_SECS)
+    while True:
+        try:
+            # 先 sleep 再扫，避免启动瞬间就触发
+            await asyncio.sleep(WATCHDOG_INTERVAL_S)
+            _sweep_stale_jobs()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("watchdog error: %s", e)
+
+
+def start_watchdog() -> None:
+    """lifespan 启动时调：拉起 watchdog 后台循环。幂等。"""
+    global _watchdog_task
+    if _watchdog_task is not None and not _watchdog_task.done():
+        return
+    _watchdog_task = asyncio.create_task(_watchdog_loop())
+    log.info("watchdog started (stale=%ds, interval=%ds)",
+             WATCHDOG_STALE_SECS, WATCHDOG_INTERVAL_S)
+
+
+async def stop_watchdog() -> None:
+    """lifespan 关闭时调：取消 watchdog 循环。"""
+    global _watchdog_task
+    if _watchdog_task is None:
+        return
+    if not _watchdog_task.done():
+        _watchdog_task.cancel()
+        try:
+            await _watchdog_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log.warning("watchdog stop: %s", e)
+    _watchdog_task = None
+    log.info("watchdog stopped")
+
+
+def start_dispatcher() -> None:
+    """lifespan 启动时调一次：拉起 dispatcher 后台循环。
+
+    幂等：重复调不会起多个 loop（看 _dispatcher_task 是否还在）。
+    """
+    global _dispatcher_task
+    init_runtime()  # 确保 _dispatcher_event 已建
+    if _dispatcher_task is not None and not _dispatcher_task.done():
+        return
+    _dispatcher_task = asyncio.create_task(_dispatcher_loop())
+    log.info("dispatcher started (MAX_CONCURRENT_JOBS=%d)", MAX_CONCURRENT_JOBS)
+
+
+async def stop_dispatcher() -> None:
+    """lifespan 关闭时调：取消 dispatcher 循环。"""
+    global _dispatcher_task
+    if _dispatcher_task is None:
+        return
+    if not _dispatcher_task.done():
+        _dispatcher_task.cancel()
+        try:
+            await _dispatcher_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log.warning("dispatcher stop: %s", e)
+    _dispatcher_task = None
+    log.info("dispatcher stopped")
+
+
+def notify_dispatcher() -> None:
+    """唤醒 dispatcher。
+
+    调用时机：
+      - create_job 落库后（立刻拉下一个）
+      - run_job / resume_job 跑完释放槽位后（让下一个顶上）
+      - 取消 job 后（虽然不直接减少 active_count，但触发一次重扫避免过期）
+    """
+    if _dispatcher_event is not None:
+        _dispatcher_event.set()
+
+
+def queue_resume(job_id: str, confirm: str) -> None:
+    """resume endpoint 调：把 confirm 写进 Job.pending_confirm + notify。
+
+    dispatcher 看到 pending_confirm IS NOT NULL 时调 resume_job，否则调 run_job。
+    """
+    with SessionLocal() as s:
+        j = s.get(DbJob, job_id)
+        if j:
+            j.pending_confirm = confirm
+            s.commit()
+    notify_dispatcher()
+
+
+async def _dispatcher_loop() -> None:
+    """dispatcher 主循环：有空位 + 有 queued job → 拉起下一个。
+
+    唤醒源：
+      - notify_dispatcher() 立刻触发
+      - 内部 wait_for(event, 2s) 兜底（应对漏 signal / 跨重启场景）
+    """
+    assert _dispatcher_event is not None
+    log.info("dispatcher loop running")
+    while True:
+        try:
+            await _dispatch_one()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("dispatcher error: %s", e)
+        # 等下一次唤醒；2s 兜底
+        try:
+            await asyncio.wait_for(_dispatcher_event.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+        _dispatcher_event.clear()
+
+
+async def _dispatch_one() -> None:
+    """有空位就从队列里拉一个 job 启动。
+
+    优先级：
+      1. resume job（pending_confirm IS NOT NULL）—— 用户已确认，优先顶上避免长时间等待
+      2. 否则 FIFO（按 created_at 升序）
+
+    SQLite 没 NULLS LAST：用 `(pending_confirm IS NULL)` —— False (=NOT NULL) 排在前。
+    """
+    if active_count() >= MAX_CONCURRENT_JOBS:
+        return
+    with SessionLocal() as s:
+        # 优先 resume（pending_confirm 非空），再按 FIFO（同 created_at 用 id 排，保证稳定）。
+        # SQLAlchemy 里 (pending_confirm.is_(None)) 编译成 SQLite/MySQL 通用的 IS NULL 表达式，
+        # 取反后 pending_confirm 非空 = False 排在前面。
+        j = (
+            s.query(DbJob)
+            .filter(DbJob.status == "queued")
+            .order_by(
+                DbJob.pending_confirm.is_(None).asc(),
+                DbJob.created_at.asc(),
+                DbJob.id.asc(),
+            )
+            .first()
+        )
+        if not j:
+            return
+        # 二次确认（防 cancel 抢先、或并发 modify）
+        fresh = s.get(DbJob, j.id)
+        if not fresh or fresh.status != "queued":
+            return
+        job_id = fresh.id
+        user_id = fresh.user_id
+        prompt = fresh.prompt
+        project_name = fresh.project_name
+        confirm = fresh.pending_confirm  # None 表示新 run；非 None 是 resume
+        # 取出后立刻清掉 pending_confirm——避免 dispatch 失败时无限重试同一个 confirm
+        if confirm is not None:
+            fresh.pending_confirm = None
+            s.commit()
+
+    upload_paths = _collect_upload_paths(user_id, job_id)
+
+    if confirm is not None:
+        log.info("dispatcher: resume job %s (queue_len=%d, active=%d)",
+                 job_id, queue_count(), active_count())
+        asyncio.create_task(resume_job(job_id, confirm))
+    else:
+        log.info("dispatcher: start job %s (queue_len=%d, active=%d)",
+                 job_id, queue_count(), active_count())
+        asyncio.create_task(run_job(job_id, prompt, project_name, upload_paths=upload_paths))
+
+
+def queue_count() -> int:
+    """当前 queued 状态的 job 数量（DB 视角）。"""
+    with SessionLocal() as s:
+        return s.query(DbJob).filter(DbJob.status == "queued").count()
+
+
+def queue_position(job_id: str) -> int | None:
+    """返回 job 在队列中的位置（1-indexed）；不在 queued 返回 None。
+
+    给前端做「您前面还有 N 位」提示用。
+
+    按 dispatcher 同样的优先级排序（pending_confirm 非空优先 + FIFO），
+    找到 job_id 在排序列表里的 index。SQLite 的 DateTime 存为秒精度字符串，
+    用 `<` 比较 datetime 对象有微秒差异问题；用 list 索引更稳。
+    """
+    with SessionLocal() as s:
+        j = s.get(DbJob, job_id)
+        if not j or j.status != "queued":
+            return None
+        all_queued = (
+            s.query(DbJob.id)
+            .filter(DbJob.status == "queued")
+            .order_by(
+                DbJob.pending_confirm.is_(None).asc(),
+                DbJob.created_at.asc(),
+                DbJob.id.asc(),  # 同 created_at 时按 id 排，保证稳定
+            )
+            .all()
+        )
+        for idx, (qid,) in enumerate(all_queued):
+            if qid == job_id:
+                return idx + 1
+        return None  # 理论上不会到这（j 是 queued）
 
 
 def _next_seq(job_id: str) -> int:
@@ -790,7 +1217,8 @@ def active_job_ids() -> list[str]:
 
 
 def has_capacity() -> bool:
-    return _active_sem is None or getattr(_active_sem, "_value", 0) > 0
+    """是否还有空槽（dispatcher 拿这个决定能否拉起下一个）。"""
+    return active_count() < MAX_CONCURRENT_JOBS
 
 
 def is_active(job_id: str | None = None) -> bool:
@@ -840,31 +1268,22 @@ def _event_to_db_payload(ev: dict) -> tuple[str, dict] | None:
 async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: list[str] | None = None) -> None:
     """后台任务入口：跑一次 ppt-master 生成。
 
+    由 dispatcher 拉起（dispatcher 已经确保 active_count() < MAX_CONCURRENT_JOBS），
+    本函数不再 acquire semaphore / 不再排队——信任 dispatcher。
+
     Phase 2 行为：
       - 从 Job 行读 user_id（run_job 不接受 user_id 参数；HTTP 层已设进 DB）
       - 算 per-user project_root = data/users/<uid>/projects/<job_id>/
       - mkdir -p project_root
       - 把 upload_paths（绝对路径列表）塞进 prompt，让 agent 跑 import-sources --copy
-      - 拿全局并发 semaphore
+      - 改 status=running（带二次确认防 cancel 抢先）
       - 启动 worker 线程跑 run_sync
-      - 完成后写 job 表 + fanout
-      - 任何异常 finally 标 failed 并释放锁
+      - 完成后写 job 表 + fanout + 通知 dispatcher（让队列下一个顶上）
+      - 任何异常 finally 标 failed 并清状态
     """
-    init_runtime()  # 懒建 asyncio.Semaphore；不清 job 清单（那是 lifespan 的活）
-    assert _active_sem is not None
+    init_runtime()
 
-    # 兜底：HTTP 层已检查 capacity；这里再检查一次，满了就把 job 标 failed。
-    if not has_capacity():
-        _enqueue_event(job_id, "error", {"message": "too many jobs are running"})
-        with SessionLocal() as s:
-            j = s.get(DbJob, job_id)
-            if j:
-                j.status = "failed"
-                j.error_message = "too many jobs are running"
-                s.commit()
-        return
-
-    # 读 Job 拿 user_id → 算 project_root（require_confirm 字段已废弃）
+    # 读 Job 拿 user_id → 算 project_root
     with SessionLocal() as s:
         j = s.get(DbJob, job_id)
         if not j:
@@ -878,142 +1297,172 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
 
     project_root.mkdir(parents=True, exist_ok=True)
 
-    async with _active_sem:
-        _active_job_ids.add(job_id)
-        _active_proc_holders[job_id] = []
-        _active_cancel_events[job_id] = threading.Event()
+    # 二次确认：dispatcher 选出来到真的开跑中间可能被用户取消
+    with SessionLocal() as s:
+        j = s.get(DbJob, job_id)
+        if not j or j.status == "cancelled":
+            return
+        if j.status not in ("queued", "running"):
+            return
+        j.status = "running"
+        s.commit()
 
-        def on_event(ev: dict) -> None:
-            # 同步回调，跑在 worker 线程里。事件入 DB + fanout。
-            t = _event_to_db_payload(ev)
-            if t is None:
-                return
-            type_, payload = t
-            _enqueue_event(job_id, type_, payload)
+    _active_job_ids.add(job_id)
+    _active_proc_holders[job_id] = []
+    _active_cancel_events[job_id] = threading.Event()
+    _enqueue_event(job_id, "status", {"status": "running"})
 
-        loop = asyncio.get_running_loop()
-        try:
-            # 在线程池跑 run_sync
-            final = await asyncio.to_thread(
-                run_sync, prompt, project_name, project_root, on_event,
-                upload_paths=upload_paths,
-                cancel_event=_active_cancel_events[job_id],
-                proc_holder=_active_proc_holders[job_id],
-                require_confirm=False,  # 八点确认已禁用，永远不要求确认
-                job_id=job_id,
-            )
-            # 写 job 表
-            with SessionLocal() as s:
-                j = s.get(DbJob, job_id)
-                if j:
-                    j.status = final["status"]
-                    j.session_id = final["session_id"]
-                    j.project_dir = final["project_dir"]
-                    j.pptx_path = final["pptx_path"]
-                    j.cost_usd = final["cost_usd"]
-                    j.error_message = final.get("error_message")
-                    s.commit()
-            if final.get("pptx_path"):
-                _enqueue_event(job_id, "pptx", {"url": f"/api/jobs/{job_id}/pptx"})
-        except Exception as e:
-            logging.exception("run_job failed")
-            with SessionLocal() as s:
-                j = s.get(DbJob, job_id)
-                if j:
-                    j.status = "failed"
-                    j.error_message = f"runner exception: {e}"
-                    s.commit()
-                # runner 异常 refund 1 credit（pre-decrement 的对冲）。
-                # 正常 run_sync 返回的 status="failed"（claude 跑完但没出 pptx）不 refund。
-                if j and j.user_id:
+    def on_event(ev: dict) -> None:
+        # 同步回调，跑在 worker 线程里。事件入 DB + fanout。
+        t = _event_to_db_payload(ev)
+        if t is None:
+            return
+        type_, payload = t
+        _enqueue_event(job_id, type_, payload)
+
+    try:
+        # 在线程池跑 run_sync
+        final = await asyncio.to_thread(
+            run_sync, prompt, project_name, project_root, on_event,
+            upload_paths=upload_paths,
+            cancel_event=_active_cancel_events[job_id],
+            proc_holder=_active_proc_holders[job_id],
+            require_confirm=False,  # 八点确认已禁用，永远不要求确认
+            job_id=job_id,
+        )
+        # 写 job 表
+        with SessionLocal() as s:
+            j = s.get(DbJob, job_id)
+            if j:
+                j.status = final["status"]
+                j.session_id = final["session_id"]
+                j.project_dir = final["project_dir"]
+                j.pptx_path = final["pptx_path"]
+                j.cost_usd = final["cost_usd"]
+                j.error_message = final.get("error_message")
+                # 进展检测 bail：refund credit（agent 撒谎 / 空转不是用户的问题）
+                if final.get("refund") and j.user_id:
                     u = s.get(User, j.user_id)
                     if u:
                         u.quota_credits += 1
-            _enqueue_event(job_id, "error", {"message": f"runner exception: {e}"})
-        finally:
-            _active_job_ids.discard(job_id)
-            _active_proc_holders.pop(job_id, None)
-            _active_cancel_events.pop(job_id, None)
+                        log.info("refund 1 credit to user %s (auto-resume bail for job %s)",
+                                 j.user_id, job_id)
+                s.commit()
+        if final.get("pptx_path"):
+            _enqueue_event(job_id, "pptx", {"url": f"/api/jobs/{job_id}/pptx"})
+    except Exception as e:
+        logging.exception("run_job failed")
+        with SessionLocal() as s:
+            j = s.get(DbJob, job_id)
+            if j:
+                j.status = "failed"
+                j.error_message = f"runner exception: {e}"
+                s.commit()
+            # runner 异常 refund 1 credit（pre-decrement 的对冲）。
+            # 正常 run_sync 返回的 status="failed"（claude 跑完但没出 pptx）不 refund。
+            if j and j.user_id:
+                u = s.get(User, j.user_id)
+                if u:
+                    u.quota_credits += 1
+        _enqueue_event(job_id, "error", {"message": f"runner exception: {e}"})
+    finally:
+        _active_job_ids.discard(job_id)
+        _active_proc_holders.pop(job_id, None)
+        _active_cancel_events.pop(job_id, None)
+        # 槽位释放：唤醒 dispatcher 让下一个 queued job 顶上
+        notify_dispatcher()
+
+
+def _collect_upload_paths(user_id: str | None, job_id: str) -> list[str]:
+    """dispatcher 拉起 run_job 时重新扫 staging 目录得到 upload_paths。
+
+    create_job 阶段已经把文件写到 data/users/<uid>/uploads/<job_id>/，但
+    upload_paths 没落库——dispatcher 不在 HTTP 请求上下文里，所以从磁盘重扫。
+    """
+    if not user_id:
+        return []
+    d = uploads_dir_for(user_id, job_id)
+    if not d.exists():
+        return []
+    return sorted(str(p.resolve()) for p in d.iterdir() if p.is_file())
 
 
 async def resume_job(job_id: str, confirm: str) -> None:
-    """后台任务入口：注入确认继续。前提：job.status == 'paused' 且有 session_id。
+    """后台任务入口：注入确认继续 `--resume <session_id>`。
 
-    Phase 2: 从 Job 行读 user_id → project_root + project_name，传给 resume_sync。
+    由 dispatcher 拉起（dispatcher 已经确保有空位），不再 acquire semaphore。
+    接受 job.status in ('paused', 'queued')：dispatcher 路径里 endpoint 已经把
+    status 改成 queued；直接调路径里 status 还是 paused。
     """
     init_runtime()
-    assert _active_sem is not None
 
-    if not has_capacity():
-        _enqueue_event(job_id, "error", {"message": "too many jobs are running"})
-        return
+    with SessionLocal() as s:
+        j = s.get(DbJob, job_id)
+        if not j:
+            _enqueue_event(job_id, "error", {"message": f"job {job_id} not found"})
+            return
+        if j.status not in ("paused", "queued"):
+            _enqueue_event(job_id, "error", {"message": f"job status is {j.status}, cannot resume"})
+            return
+        if not j.session_id:
+            _enqueue_event(job_id, "error", {"message": "no session_id to resume"})
+            return
+        if not j.user_id:
+            _enqueue_event(job_id, "error", {"message": "job has no user_id"})
+            return
+        session_id = j.session_id
+        project_name = j.project_name
+        project_root = project_root_for(j.user_id, job_id)
+        j.status = "running"
+        s.commit()
 
-    async with _active_sem:
+    _active_job_ids.add(job_id)
+    _active_proc_holders[job_id] = []
+    _active_cancel_events[job_id] = threading.Event()
+
+    def on_event(ev: dict) -> None:
+        t = _event_to_db_payload(ev)
+        if t is None:
+            return
+        type_, payload = t
+        _enqueue_event(job_id, type_, payload)
+
+    try:
+        final = await asyncio.to_thread(
+            resume_sync, session_id, confirm, project_root, project_name, on_event,
+            cancel_event=_active_cancel_events[job_id],
+            proc_holder=_active_proc_holders[job_id],
+            job_id=job_id,
+        )
         with SessionLocal() as s:
             j = s.get(DbJob, job_id)
-            if not j:
-                _enqueue_event(job_id, "error", {"message": f"job {job_id} not found"})
-                return
-            if j.status != "paused":
-                _enqueue_event(job_id, "error", {"message": f"job status is {j.status}, cannot resume"})
-                return
-            if not j.session_id:
-                _enqueue_event(job_id, "error", {"message": "no session_id to resume"})
-                return
-            if not j.user_id:
-                _enqueue_event(job_id, "error", {"message": "job has no user_id"})
-                return
-            session_id = j.session_id
-            project_name = j.project_name
-            project_root = project_root_for(j.user_id, job_id)
-            j.status = "running"
-            s.commit()
-
-        _active_job_ids.add(job_id)
-        _active_proc_holders[job_id] = []
-        _active_cancel_events[job_id] = threading.Event()
-
-        def on_event(ev: dict) -> None:
-            t = _event_to_db_payload(ev)
-            if t is None:
-                return
-            type_, payload = t
-            _enqueue_event(job_id, type_, payload)
-
-        try:
-            final = await asyncio.to_thread(
-                resume_sync, session_id, confirm, project_root, project_name, on_event,
-                cancel_event=_active_cancel_events[job_id],
-                proc_holder=_active_proc_holders[job_id],
-                job_id=job_id,
-            )
-            with SessionLocal() as s:
-                j = s.get(DbJob, job_id)
-                if j:
-                    # cost 累加
-                    prev_cost = j.cost_usd or 0
-                    j.status = final["status"]
-                    j.session_id = final["session_id"] or session_id
-                    j.project_dir = final["project_dir"] or j.project_dir
-                    j.pptx_path = final["pptx_path"] or j.pptx_path
-                    j.cost_usd = prev_cost + (final["cost_usd"] or 0)
-                    j.error_message = final.get("error_message")
-                    s.commit()
-            if final.get("pptx_path"):
-                _enqueue_event(job_id, "pptx", {"url": f"/api/jobs/{job_id}/pptx"})
-        except Exception as e:
-            logging.exception("resume_job failed")
-            with SessionLocal() as s:
-                j = s.get(DbJob, job_id)
-                if j:
-                    j.status = "failed"
-                    j.error_message = f"resume exception: {e}"
-                    s.commit()
-            _enqueue_event(job_id, "error", {"message": f"resume exception: {e}"})
-        finally:
-            _active_job_ids.discard(job_id)
-            _active_proc_holders.pop(job_id, None)
-            _active_cancel_events.pop(job_id, None)
+            if j:
+                # cost 累加
+                prev_cost = j.cost_usd or 0
+                j.status = final["status"]
+                j.session_id = final["session_id"] or session_id
+                j.project_dir = final["project_dir"] or j.project_dir
+                j.pptx_path = final["pptx_path"] or j.pptx_path
+                j.cost_usd = prev_cost + (final["cost_usd"] or 0)
+                j.error_message = final.get("error_message")
+                s.commit()
+        if final.get("pptx_path"):
+            _enqueue_event(job_id, "pptx", {"url": f"/api/jobs/{job_id}/pptx"})
+    except Exception as e:
+        logging.exception("resume_job failed")
+        with SessionLocal() as s:
+            j = s.get(DbJob, job_id)
+            if j:
+                j.status = "failed"
+                j.error_message = f"resume exception: {e}"
+                s.commit()
+        _enqueue_event(job_id, "error", {"message": f"resume exception: {e}"})
+    finally:
+        _active_job_ids.discard(job_id)
+        _active_proc_holders.pop(job_id, None)
+        _active_cancel_events.pop(job_id, None)
+        # 槽位释放：唤醒 dispatcher 让下一个顶上
+        notify_dispatcher()
 
 
 def cancel_active(job_id: str) -> bool:

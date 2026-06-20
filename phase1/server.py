@@ -82,12 +82,18 @@ from phase1.core import (  # noqa: E402
     init_runtime,
     is_active,
     MAX_CONCURRENT_JOBS,
-    resume_job,
-    run_job,
+    notify_dispatcher,
+    queue_count,
+    queue_position,
+    queue_resume,
+    start_dispatcher,
+    start_watchdog,
+    stop_dispatcher,
+    stop_watchdog,
     subscribe,
     unsubscribe,
 )
-from phase1.db import SessionLocal, init_db, migrate_v1_to_v2, migrate_v2_to_v3  # noqa: E402
+from phase1.db import SessionLocal, init_db, migrate_v1_to_v2, migrate_v2_to_v3, migrate_v3_to_v4  # noqa: E402
 from phase1.models import Event, Job, User  # noqa: E402
 from phase1.paths import (  # noqa: E402
     DATA_DIR,
@@ -112,20 +118,30 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI 0.115+ 风格的 lifespan：迁移 + 建表 + 拉起 asyncio 锁 + 清理上次残留。"""
+    """FastAPI 0.115+ 风格的 lifespan：迁移 + 建表 + 拉起 dispatcher + 清理上次残留。"""
     # Phase 2: 先迁移（如果旧 schema 在）；再 init_db（建 users + 重建 jobs + events）
     if migrate_v1_to_v2():
         log.warning("phase1 migrate_v1_to_v2 done; old jobs.db dropped")
     if migrate_v2_to_v3():
         log.warning("phase1 migrate_v2_to_v3 done; added jobs.require_confirm")
+    if migrate_v3_to_v4():
+        log.warning("phase1 migrate_v3_to_v4 done; added jobs.pending_confirm")
     init_db()  # 双保险
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     init_runtime()
     n = cleanup_stuck_jobs()
     if n:
         log.warning(f"cleaned up {n} stuck job(s) from previous run")
+    # 启动 dispatcher：会扫一次 queued jobs 把上次遗留的拉起来
+    start_dispatcher()
+    # 启动 watchdog：每 60s 扫一次 running job，10 分钟没新 event → kill + mark failed
+    start_watchdog()
     log.info("phase1 server ready")
     yield
+    # 关闭：先停 watchdog（防止它在 shutdown 中再次 mark failed），
+    # 再停 dispatcher（让 active job 自己跑完或被 docker stop）
+    await stop_watchdog()
+    await stop_dispatcher()
     log.info("phase1 server shutting down")
 
 
@@ -224,6 +240,7 @@ async def health() -> dict:
         "active_job": is_active(),
         "active_count": active_count(),
         "active_job_ids": active_job_ids(),
+        "queue_length": queue_count(),
         "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
     }
 
@@ -247,6 +264,8 @@ def _job_to_dict(j: Job) -> dict:
         "error_message": j.error_message,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "updated_at": j.updated_at.isoformat() if j.updated_at else None,
+        # 队列位置：只在 queued 时有意义；其他状态为 None
+        "queue_position": queue_position(j.id),
     }
 
 
@@ -274,19 +293,16 @@ async def create_job(
     project_name: Annotated[str | None, Form()] = None,
     files: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
-    """新建 job + staging 上传文件 + 启动后台生成。
+    """新建 job + staging 上传文件 + 入队等 dispatcher 调度。
 
     流程：
-      1. 校验 prompt / 全局并发上限 / 配额
-      2. 建 Job 行（user_id）
+      1. 校验 prompt / 配额
+      2. 建 Job 行（user_id，status=queued）
       3. mkdir uploads + project_root
       4. 流式写上传文件，校验大小 + 路径
       5. 预扣 1 credit（事务里）
-      6. asyncio.create_task 启动 run_job（附 upload_paths）
+      6. notify_dispatcher() — 后台 loop 看见有空位就把这个 job 拉起来跑
     """
-    if not has_capacity():
-        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
-
     # 配额预扣 + job 创建（同一事务里原子；失败回滚）
     job_id = str(uuid.uuid4())
     pname = (project_name or f"web_{job_id[:8]}").strip()[:64]
@@ -356,7 +372,8 @@ async def create_job(
             await f.close()
         upload_paths.append(str(dest.resolve()))
 
-    asyncio.create_task(run_job(job_id, prompt, pname, upload_paths=upload_paths))
+    # 入队 → notify dispatcher。dispatcher 看见有空位才把这个 job 拉起来跑。
+    notify_dispatcher()
     return {"id": job_id, "project_name": pname, "status": "queued", "uploads": len(upload_paths)}
 
 
@@ -397,8 +414,6 @@ async def resume_job_endpoint(
     注意：不要把 body 声明成 FastAPI 参数（即便标 Body(None) 也可能被 Pydantic 当 dict 校验，
     多 part 请求会触发 'Input should be a valid dictionary' 422）。改为手动按 Content-Type 取 JSON。
     """
-    if not has_capacity():
-        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
     body_confirm = ""
     ctype = (request.headers.get("content-type") or "").lower()
     if "application/json" in ctype:
@@ -421,10 +436,12 @@ async def resume_job_endpoint(
             raise HTTPException(400, f"job status is {j.status}, can only resume paused jobs")
         if not j.session_id:
             raise HTTPException(400, "no session_id to resume")
-    if not has_capacity():
-        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
-    asyncio.create_task(resume_job(job_id, confirm_text))
-    return {"id": job_id, "status": "running"}
+        # 把 status 改成 queued，让 dispatcher 看到后排进 FIFO；confirm 写到
+        # Job.pending_confirm，dispatcher 拉起时优先 resume（pending_confirm 非空）。
+        j.status = "queued"
+        s.commit()
+    queue_resume(job_id, confirm_text)
+    return {"id": job_id, "status": "queued"}
 
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -432,6 +449,15 @@ async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = _get_job_or_404(s, job_id)
         _require_owner_or_admin(j, user)
+    if j.status == "queued":
+        with SessionLocal() as s:
+            j2 = _get_job_or_404(s, job_id)
+            _require_owner_or_admin(j2, user)
+            if j2.status == "queued":
+                j2.status = "cancelled"
+                j2.error_message = "user cancelled"
+                s.commit()
+        return {"id": job_id, "status": "cancelled"}
     if not is_active(job_id):
         raise HTTPException(400, "this job is not currently active")
     ok = cancel_active(job_id)
