@@ -46,7 +46,16 @@ RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
     edge-tts>=7.2.8 \
     cairosvg>=2.7 \
     Pillow>=10.0 \
-    requests>=2.31
+    requests>=2.31 \
+    flask>=3.0 \
+    flask-cors>=4.0 \
+    watchdog>=4.0 \
+    beautifulsoup4>=4.12 \
+    lxml>=5.0 \
+    pandas>=2.0 \
+    openpyxl>=3.1 \
+    python-docx>=1.1 \
+    pypdf>=4.0
 
 # 5. 装 entrypoint
 COPY docker/ppt-runner/entrypoint.sh /entrypoint.sh

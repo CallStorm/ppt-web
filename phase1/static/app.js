@@ -166,7 +166,7 @@ function renderMain() {
         <h2>历史任务</h2>
         <ul id="job-list" class="job-list"></ul>
         <button id="refresh-list" class="ghost">刷新</button>
-        <p class="hint warn">单 job 串行：系统一次只能跑一个生成任务。</p>
+        <p class="hint warn">当前支持最多 3 个任务并发；超过上限请稍后再试。</p>
       </section>
 
       <section class="col col-right" id="detail-pane">

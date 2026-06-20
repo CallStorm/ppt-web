@@ -104,6 +104,7 @@ unset USE_DOCKER_RUNNER
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
+| `MAX_CONCURRENT_JOBS` | `3` | 全局最多同时跑几个生成任务；超过后返回 409 |
 | `USE_DOCKER_RUNNER` | `false` | 是否走 docker |
 | `DOCKER_RUNNER_IMAGE` | `ppt-runner:latest` | 镜像名 |
 | `DOCKER_RUNNER_NETWORK` | `ppt-isolated` | bridge 网络（用 `build.sh` 自动建） |
@@ -112,6 +113,17 @@ unset USE_DOCKER_RUNNER
 | `DOCKER_RUNNER_TIMEOUT_S` | `1800` | 单 job 超时（秒），超时强杀 |
 
 > ⚠️ Docker 模式下 ppt-master 子脚本的硬编码端口问题**自动消失**（每个容器独立 netns）。
+
+## 鉴权密钥
+
+开发/生产都建议固定 JWT secret，否则服务一重启登录态就会失效：
+
+```bash
+openssl rand -hex 32
+# 把输出写入 .env：
+PPT_WEB_JWT_SECRET=<上一步输出>
+```
+
 
 ## 生成行为
 

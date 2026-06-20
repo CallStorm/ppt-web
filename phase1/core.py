@@ -691,27 +691,28 @@ def resume_sync(
 
 
 # ── async 入口（FastAPI server 用）───────────────────────────────────
-# 单活动 job 锁 + 事件 fanout（DB 写 + 推到所有订阅者 Queue）。
+# 全局并发 semaphore + 事件 fanout（DB 写 + 推到所有订阅者 Queue）。
 
-_active_lock: asyncio.Lock | None = None  # 懒初始化（asyncio.Lock 必须在 event loop 里建）
-_active_job_id: str | None = None
-_active_proc_holder: list = []  # 放当前 Popen，供 cancel 用
-_active_cancel_event: threading.Event | None = None
+MAX_CONCURRENT_JOBS: int = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))
+_active_sem: asyncio.Semaphore | None = None  # 懒初始化（asyncio.Semaphore 必须在 event loop 里建）
+_active_job_ids: set[str] = set()
+_active_proc_holders: dict[str, list] = {}  # 放当前 Popen，供 cancel 用
+_active_cancel_events: dict[str, threading.Event] = {}
 _subscribers: dict[str, list[asyncio.Queue]] = {}
 _seq_counters: dict[str, int] = {}
 _seq_locks: dict[str, threading.Lock] = {}
 
 
 def init_runtime() -> None:
-    """在 event loop 里调用一次：建表 + 建 asyncio.Lock。
+    """在 event loop 里调用一次：建表 + 建 asyncio.Semaphore。
 
     注意：不要把"清理上次残留 job"放这里——run_job 热路径会再调一次，会把刚
     启动的 job 立刻标 failed。清理逻辑拆到 cleanup_stuck_jobs()，lifespan 单次调。
     """
-    global _active_lock
+    global _active_sem
     init_db()
-    if _active_lock is None:
-        _active_lock = asyncio.Lock()
+    if _active_sem is None:
+        _active_sem = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 def cleanup_stuck_jobs() -> int:
@@ -780,12 +781,27 @@ def unsubscribe(job_id: str, q: asyncio.Queue) -> None:
             del _subscribers[job_id]
 
 
-def is_active() -> bool:
-    return _active_lock is not None and _active_lock.locked()
+def active_count() -> int:
+    return len(_active_job_ids)
+
+
+def active_job_ids() -> list[str]:
+    return sorted(_active_job_ids)
+
+
+def has_capacity() -> bool:
+    return _active_sem is None or getattr(_active_sem, "_value", 0) > 0
+
+
+def is_active(job_id: str | None = None) -> bool:
+    if job_id is not None:
+        return job_id in _active_job_ids
+    return bool(_active_job_ids)
 
 
 def get_active_job_id() -> str | None:
-    return _active_job_id
+    # 向后兼容：老调用只关心单 active，返回任意一个
+    return next(iter(_active_job_ids), None)
 
 
 def _event_to_db_payload(ev: dict) -> tuple[str, dict] | None:
@@ -829,18 +845,23 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
       - 算 per-user project_root = data/users/<uid>/projects/<job_id>/
       - mkdir -p project_root
       - 把 upload_paths（绝对路径列表）塞进 prompt，让 agent 跑 import-sources --copy
-      - 拿单活动 job 锁
+      - 拿全局并发 semaphore
       - 启动 worker 线程跑 run_sync
       - 完成后写 job 表 + fanout
       - 任何异常 finally 标 failed 并释放锁
     """
-    global _active_job_id, _active_proc_holder, _active_cancel_event
-    init_runtime()  # 懒建 asyncio.Lock；不清 job 清单（那是 lifespan 的活）
-    assert _active_lock is not None
+    init_runtime()  # 懒建 asyncio.Semaphore；不清 job 清单（那是 lifespan 的活）
+    assert _active_sem is not None
 
-    if _active_lock.locked():
-        # 已被另一个 job 持有——理论上前置 HTTP 路由就拦了，这里兜底
-        _enqueue_event(job_id, "error", {"message": "another job is running"})
+    # 兜底：HTTP 层已检查 capacity；这里再检查一次，满了就把 job 标 failed。
+    if not has_capacity():
+        _enqueue_event(job_id, "error", {"message": "too many jobs are running"})
+        with SessionLocal() as s:
+            j = s.get(DbJob, job_id)
+            if j:
+                j.status = "failed"
+                j.error_message = "too many jobs are running"
+                s.commit()
         return
 
     # 读 Job 拿 user_id → 算 project_root（require_confirm 字段已废弃）
@@ -857,10 +878,10 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
 
     project_root.mkdir(parents=True, exist_ok=True)
 
-    async with _active_lock:
-        _active_job_id = job_id
-        _active_proc_holder = []
-        _active_cancel_event = threading.Event()
+    async with _active_sem:
+        _active_job_ids.add(job_id)
+        _active_proc_holders[job_id] = []
+        _active_cancel_events[job_id] = threading.Event()
 
         def on_event(ev: dict) -> None:
             # 同步回调，跑在 worker 线程里。事件入 DB + fanout。
@@ -876,8 +897,8 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
             final = await asyncio.to_thread(
                 run_sync, prompt, project_name, project_root, on_event,
                 upload_paths=upload_paths,
-                cancel_event=_active_cancel_event,
-                proc_holder=_active_proc_holder,
+                cancel_event=_active_cancel_events[job_id],
+                proc_holder=_active_proc_holders[job_id],
                 require_confirm=False,  # 八点确认已禁用，永远不要求确认
                 job_id=job_id,
             )
@@ -910,9 +931,9 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                         u.quota_credits += 1
             _enqueue_event(job_id, "error", {"message": f"runner exception: {e}"})
         finally:
-            _active_job_id = None
-            _active_proc_holder = []
-            _active_cancel_event = None
+            _active_job_ids.discard(job_id)
+            _active_proc_holders.pop(job_id, None)
+            _active_cancel_events.pop(job_id, None)
 
 
 async def resume_job(job_id: str, confirm: str) -> None:
@@ -920,15 +941,14 @@ async def resume_job(job_id: str, confirm: str) -> None:
 
     Phase 2: 从 Job 行读 user_id → project_root + project_name，传给 resume_sync。
     """
-    global _active_job_id, _active_proc_holder, _active_cancel_event
     init_runtime()
-    assert _active_lock is not None
+    assert _active_sem is not None
 
-    if _active_lock.locked():
-        _enqueue_event(job_id, "error", {"message": "another job is running"})
+    if not has_capacity():
+        _enqueue_event(job_id, "error", {"message": "too many jobs are running"})
         return
 
-    async with _active_lock:
+    async with _active_sem:
         with SessionLocal() as s:
             j = s.get(DbJob, job_id)
             if not j:
@@ -949,9 +969,9 @@ async def resume_job(job_id: str, confirm: str) -> None:
             j.status = "running"
             s.commit()
 
-        _active_job_id = job_id
-        _active_proc_holder = []
-        _active_cancel_event = threading.Event()
+        _active_job_ids.add(job_id)
+        _active_proc_holders[job_id] = []
+        _active_cancel_events[job_id] = threading.Event()
 
         def on_event(ev: dict) -> None:
             t = _event_to_db_payload(ev)
@@ -963,8 +983,8 @@ async def resume_job(job_id: str, confirm: str) -> None:
         try:
             final = await asyncio.to_thread(
                 resume_sync, session_id, confirm, project_root, project_name, on_event,
-                cancel_event=_active_cancel_event,
-                proc_holder=_active_proc_holder,
+                cancel_event=_active_cancel_events[job_id],
+                proc_holder=_active_proc_holders[job_id],
                 job_id=job_id,
             )
             with SessionLocal() as s:
@@ -991,30 +1011,30 @@ async def resume_job(job_id: str, confirm: str) -> None:
                     s.commit()
             _enqueue_event(job_id, "error", {"message": f"resume exception: {e}"})
         finally:
-            _active_job_id = None
-            _active_proc_holder = []
-            _active_cancel_event = None
+            _active_job_ids.discard(job_id)
+            _active_proc_holders.pop(job_id, None)
+            _active_cancel_events.pop(job_id, None)
 
 
-def cancel_active() -> bool:
-    """请求取消当前 active job。返回是否成功发起取消。"""
-    global _active_job_id
-    if _active_cancel_event is None or not _active_proc_holder:
+def cancel_active(job_id: str) -> bool:
+    """请求取消指定 active job。返回是否成功发起取消。"""
+    cancel_event = _active_cancel_events.get(job_id)
+    proc_holder = _active_proc_holders.get(job_id) or []
+    if cancel_event is None or not proc_holder:
         return False
-    _active_cancel_event.set()
-    proc = _active_proc_holder[0] if _active_proc_holder else None
+    cancel_event.set()
+    proc = proc_holder[0] if proc_holder else None
     if proc and proc.poll() is None:
         try:
             proc.terminate()
         except Exception:
             pass
     # 标 cancelled（cancel 是异步的，标了之后还会推进一轮 cleanup）
-    if _active_job_id:
-        with SessionLocal() as s:
-            j = s.get(DbJob, _active_job_id)
-            if j and j.status in ("queued", "running"):
-                j.status = "cancelled"
-                j.error_message = "user cancelled"
-                s.commit()
-        _enqueue_event(_active_job_id, "status", {"status": "cancelled"})
+    with SessionLocal() as s:
+        j = s.get(DbJob, job_id)
+        if j and j.status in ("queued", "running"):
+            j.status = "cancelled"
+            j.error_message = "user cancelled"
+            s.commit()
+    _enqueue_event(job_id, "status", {"status": "cancelled"})
     return True

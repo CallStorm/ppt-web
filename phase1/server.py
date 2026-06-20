@@ -23,7 +23,7 @@
 
 设计要点：
   - JWT 在 HttpOnly cookie；Secure 标志按 scheme 切换（dev http 不卡）
-  - 单活动 job 锁（core.is_active）——并发属 Phase 3
+  - 全局并发上限（MAX_CONCURRENT_JOBS，默认 3）——每 job 一个 Docker 容器
   - 上传 staging 到 data/users/<uid>/uploads/<job_id>/，agent 跑 import-sources --copy
   - 所有 per-user 数据走 paths.project_root_for() / paths.uploads_dir_for()
 """
@@ -74,11 +74,14 @@ from phase1.auth import (  # noqa: E402
     verify_password,
 )  # noqa: E402
 from phase1.core import (  # noqa: E402
+    active_count,
+    active_job_ids,
     cancel_active,
     cleanup_stuck_jobs,
-    get_active_job_id,
+    has_capacity,
     init_runtime,
     is_active,
+    MAX_CONCURRENT_JOBS,
     resume_job,
     run_job,
     subscribe,
@@ -216,7 +219,13 @@ async def me(user: OptionalUser) -> dict:
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"ok": True, "active_job": is_active()}
+    return {
+        "ok": True,
+        "active_job": is_active(),
+        "active_count": active_count(),
+        "active_job_ids": active_job_ids(),
+        "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
+    }
 
 
 # ── 工具：把 Job 转 dict ────────────────────────────────────────────
@@ -268,15 +277,15 @@ async def create_job(
     """新建 job + staging 上传文件 + 启动后台生成。
 
     流程：
-      1. 校验 prompt / 单活动 job 锁 / 配额
+      1. 校验 prompt / 全局并发上限 / 配额
       2. 建 Job 行（user_id）
       3. mkdir uploads + project_root
       4. 流式写上传文件，校验大小 + 路径
       5. 预扣 1 credit（事务里）
       6. asyncio.create_task 启动 run_job（附 upload_paths）
     """
-    if is_active():
-        raise HTTPException(409, "another job is running; cancel or wait for it to finish")
+    if not has_capacity():
+        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
 
     # 配额预扣 + job 创建（同一事务里原子；失败回滚）
     job_id = str(uuid.uuid4())
@@ -388,8 +397,8 @@ async def resume_job_endpoint(
     注意：不要把 body 声明成 FastAPI 参数（即便标 Body(None) 也可能被 Pydantic 当 dict 校验，
     多 part 请求会触发 'Input should be a valid dictionary' 422）。改为手动按 Content-Type 取 JSON。
     """
-    if is_active():
-        raise HTTPException(409, "another job is running")
+    if not has_capacity():
+        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
     body_confirm = ""
     ctype = (request.headers.get("content-type") or "").lower()
     if "application/json" in ctype:
@@ -412,6 +421,8 @@ async def resume_job_endpoint(
             raise HTTPException(400, f"job status is {j.status}, can only resume paused jobs")
         if not j.session_id:
             raise HTTPException(400, "no session_id to resume")
+    if not has_capacity():
+        raise HTTPException(409, f"too many jobs are running; max concurrent jobs is {MAX_CONCURRENT_JOBS}")
     asyncio.create_task(resume_job(job_id, confirm_text))
     return {"id": job_id, "status": "running"}
 
@@ -421,12 +432,9 @@ async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = _get_job_or_404(s, job_id)
         _require_owner_or_admin(j, user)
-    if not is_active():
-        raise HTTPException(400, "no job is currently active")
-    if get_active_job_id() != job_id:
-        # 别人正在跑；不让 A 取消 B 的
-        raise HTTPException(409, "this job is not the currently active one")
-    ok = cancel_active()
+    if not is_active(job_id):
+        raise HTTPException(400, "this job is not currently active")
+    ok = cancel_active(job_id)
     if not ok:
         raise HTTPException(500, "cancel failed")
     return {"id": job_id, "status": "cancelled"}
