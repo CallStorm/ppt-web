@@ -113,19 +113,14 @@ unset USE_DOCKER_RUNNER
 
 > ⚠️ Docker 模式下 ppt-master 子脚本的硬编码端口问题**自动消失**（每个容器独立 netns）。
 
-## 8 点确认开关
+## 生成行为
 
-新建任务表单里有个 checkbox：**「需要 8 点确认」**。
+每次创建任务，agent 会**直接采用 ppt-master 的推荐默认值**（画布/页数/风格/配色等）一气呵成跑完所有步骤直到导出 pptx。
 
-- **默认关闭**：agent 在 stage 3 的「八点确认」点会自动按推荐方案继续，不弹确认面板
-- **勾上**：停在确认点，详情面板会显示「⏸ 需要你的确认」让你回复
+- 不会再弹「八点确认」面板
+- 如果中途需要调整，改 prompt 里的描述重新创建任务即可
 
-全局兜底：环境变量 `SKIP_EIGHT_CONFIRM=true` 强制覆盖（运维侧一键全跳过）。
-
-```bash
-# 想让所有 job 都跳过 8 点确认
-SKIP_EIGHT_CONFIRM=true .venv/bin/uvicorn phase1.server:app
-```
+如果你需要中途停一下让 agent 问几个问题，可以自己加 prompt 指令（例如「在选定风格前先问我两个问题」），agent 会遵守 prompt 而不是写死的系统行为。
 
 ## ppt-master 是 submodule
 
@@ -158,7 +153,7 @@ ppt-web/
 │   └── README.md
 ├── phase1/                # FastAPI Web MVP
 │   ├── server.py          # 入口
-│   ├── core.py            # agent 调用 + 八点确认逻辑
+│   ├── core.py            # agent 调用 + 流式事件 + 8 点确认已默认关闭
 │   ├── auth.py / models.py / db.py / paths.py
 │   ├── static/            # 前端
 │   └── _smoke.py          # 不接 HTTP 的烟雾测试

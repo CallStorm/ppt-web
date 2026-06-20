@@ -54,17 +54,11 @@ DOCKER_RUNNER_CPUS: str = os.getenv("DOCKER_RUNNER_CPUS", "2")
 # 单 job 容器最长跑多久（秒），超时强杀。claude 生成 10 页通常 5-15 分钟
 DOCKER_RUNNER_TIMEOUT_S: int = int(os.getenv("DOCKER_RUNNER_TIMEOUT_S", "1800"))
 
-# ── 八点确认开关 ─────────────────────────────────────────────────
-# run_sync 收到 `require_confirm` 参数（来自 Job.require_confirm，由 UI 勾选）。
-# 行为：
-#   require_confirm=True  → 走 paused 路径，弹前端确认面板
-#   require_confirm=False → 自动 --resume + 喂 AUTO_CONFIRM_TEXT 让 agent 继续
-#
-# 全局兜底：SKIP_EIGHT_CONFIRM env=true 强制覆盖（运维侧一键全局跳过），
-# 不管 UI 怎么选都自动 resume。默认 false。
-SKIP_EIGHT_CONFIRM: bool = os.getenv("SKIP_EIGHT_CONFIRM", "false").strip().lower() in ("1", "true", "yes", "on")
+# ── 八点确认（已禁用）───────────────────────────────────────────
+# 八点确认功能已移除。prompt 改用"直接采用推荐默认值，不要等用户确认"，
+# run_sync 永远 auto_skip 八点确认。这里保留 env 变量和常量仅作向后兼容。
 SKIP_EIGHT_CONFIRM_MAX: int = int(os.getenv("SKIP_EIGHT_CONFIRM_MAX", "3"))
-# 与 phase0/orchestrator.py:103 默认 confirm 文本保持一致
+# 与 phase0/orchestrator.py:103 默认 confirm 文本保持一致（auto-resume 兜底用）
 AUTO_CONFIRM_TEXT: str = "确认，按你的推荐方案继续生成。"
 DATA_DIR = PROJECT_ROOT / "data"
 
@@ -166,13 +160,14 @@ def build_initial_prompt(
         project_root_str = str(project_root)
     parts = [
         "请先用 read_file 读取 skills/ppt-master/SKILL.md，然后严格按其工作流执行，"
-        "为以下内容生成一份 PPT（格式 PPT 16:9，8-10 页，自由设计）。",
+        "为以下内容生成一份 PPT（默认格式 PPT 16:9；页数、风格、内容密度优先遵循用户描述，用户没写时再自行推荐）。",
         "",
         f"项目目录名使用: {project_name}",
         f"你的项目根目录（用 --dir 标志传给 project_manager init）: {project_root_str}",
         "",
         "重要约束（Phase 0 验证环境）：",
-        "1. 对于八点确认（Step 4），使用【聊天确认】方式——直接在回复里列出推荐方案并停下等我的确认，"
+        "1. 八点确认（Step 4）已禁用：不要停下来等用户确认。直接采用你列出的推荐默认值"
+        "（画布/页数/风格/配色/字体/图标/生图策略/导出格式），一气呵成跑完所有非阻塞步骤直到导出 pptx。"
         "【不要】启动 confirm_ui/server.py（它在无头模式下会阻塞挂死）。",
         "2. 跳过需要外部 API 的可选功能（AI 生图可用网络搜图兜底，或用纯色/图标占位；不要因为缺 key 而失败）。",
         "3. 完成导出后明确告知 exports 下生成的 .pptx 路径。",
@@ -525,13 +520,16 @@ def run_sync(
     cost = result.get("total_cost_usd")
     stop_reason = result.get("stop_reason", "end_turn")
 
-    # 是否自动跳过八点确认：env 强制 OR 用户没勾选 require_confirm。
-    effective_skip = SKIP_EIGHT_CONFIRM or not require_confirm
-    if effective_skip and not pptx and stop_reason == "end_turn" and session_id:
+    # 八点确认已禁用，永远自动跳过（兜底：如果 agent 还是停下等用户，auto-resume 让它继续）
+    effective_skip = True
+    # 兼容第三方 API（minimaxi 等）的 stop_reason 行为：agent 主动停下等用户时
+    # 官方 anthropic 返回 "end_turn"，但有些代理返回 None。一律当"主动停下"处理。
+    STOP_OK = ("end_turn", None)
+    if not pptx and stop_reason in STOP_OK and session_id:
         auto_round = 0
         while (
             not pptx
-            and stop_reason == "end_turn"
+            and stop_reason in STOP_OK
             and auto_round < SKIP_EIGHT_CONFIRM_MAX
         ):
             if cancel_event is not None and cancel_event.is_set():
@@ -591,8 +589,8 @@ def run_sync(
 
     if pptx:
         status = "done"
-    elif stop_reason == "end_turn":
-        # agent 主动 end_turn 但还没出 pptx = 暂停等确认
+    elif stop_reason in STOP_OK:
+        # agent 主动停下但还没出 pptx = 暂停等确认
         status = "paused"
     else:
         status = "failed"
@@ -674,7 +672,7 @@ def resume_sync(
 
     if pptx:
         status = "done"
-    elif stop_reason == "end_turn":
+    elif stop_reason in ("end_turn", None):
         status = "paused"
     else:
         status = "failed"
@@ -845,7 +843,7 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
         _enqueue_event(job_id, "error", {"message": "another job is running"})
         return
 
-    # 读 Job 拿 user_id + require_confirm → 算 project_root
+    # 读 Job 拿 user_id → 算 project_root（require_confirm 字段已废弃）
     with SessionLocal() as s:
         j = s.get(DbJob, job_id)
         if not j:
@@ -855,7 +853,6 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
         if not user_id:
             _enqueue_event(job_id, "error", {"message": "job has no user_id (legacy?)"})
             return
-        require_confirm = j.require_confirm
         project_root = project_root_for(user_id, job_id)
 
     project_root.mkdir(parents=True, exist_ok=True)
@@ -881,7 +878,7 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                 upload_paths=upload_paths,
                 cancel_event=_active_cancel_event,
                 proc_holder=_active_proc_holder,
-                require_confirm=require_confirm,
+                require_confirm=False,  # 八点确认已禁用，永远不要求确认
                 job_id=job_id,
             )
             # 写 job 表

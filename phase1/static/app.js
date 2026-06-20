@@ -158,10 +158,6 @@ function renderMain() {
           <label>素材文件（可选，可多选；PDF / DOCX / MD / PPTX / 图片…）
             <input type="file" id="files" multiple />
           </label>
-          <label class="checkbox-label" title="默认关闭：agent 在 8 点确认时自动按推荐继续；开启后会在确认点停下等你回复。">
-            <input type="checkbox" id="require-confirm" />
-            需要 8 点确认（关掉后会自动按推荐方案继续）
-          </label>
           <p class="file-list" id="file-list"></p>
           <button type="submit" id="submit-btn">创建并启动</button>
           <p class="hint" id="new-job-hint"></p>
@@ -209,12 +205,9 @@ function renderMain() {
     try {
       const prompt = $("#prompt").value.trim();
       const project_name = $("#project-name").value.trim() || null;
-      const require_confirm = $("#require-confirm").checked;
       const fd = new FormData();
       fd.append("prompt", prompt);
       if (project_name) fd.append("project_name", project_name);
-      // checkbox 显式 append 字符串，让后端 bool 字段收到确定值。
-      fd.append("require_confirm", require_confirm ? "true" : "false");
       const fs = $("#files").files;
       for (const f of fs) fd.append("files", f, f.name);
       const r = await api("POST", "/api/jobs", fd);
@@ -222,7 +215,6 @@ function renderMain() {
       hint.textContent = `✓ 已创建 ${r.id.slice(0, 8)}（上传 ${r.uploads} 个文件）`;
       $("#prompt").value = "";
       $("#project-name").value = "";
-      $("#require-confirm").checked = false;
       $("#files").value = "";
       $("#file-list").textContent = "";
       await refreshList();
@@ -320,8 +312,6 @@ function handleEvent(type, payload) {
   } else if (type === "status") {
     $("#detail-status").textContent = payload.status;
     $("#detail-status").className = "status-pill status-" + payload.status;
-    if (payload.status === "paused") showConfirmPanel();
-    else if (payload.status === "running") hideConfirmPanel();
   } else if (type === "tool") {
     appendTimeline({
       type: "tool",
@@ -378,18 +368,6 @@ function renderDetail(j) {
       <div class="last-text" id="last-text">${escapeHtml(j.last_agent_text || "(等待输出…)")}</div>
     </div>
 
-    <div class="section" id="confirm-section" style="display:none">
-      <div class="confirm-panel">
-        <h4>⏸ 需要你的确认</h4>
-        <p>agent 在八点确认阶段停下。把你的确认 / 修改意见写在下面发回去：</p>
-        <textarea id="confirm-text" placeholder="例：确认 8 页，pythonn蓝黄配色，图标用 tabler-filled，跳过 AI 生图。开干吧。"></textarea>
-        <div class="actions">
-          <button id="confirm-submit">发送确认</button>
-          <button class="ghost" id="confirm-cancel">收起</button>
-        </div>
-      </div>
-    </div>
-
     <div class="section">
       <h3>事件时间线</h3>
       <div class="timeline" id="timeline"><div class="row" style="color:var(--muted)">等待事件…</div></div>
@@ -397,11 +375,6 @@ function renderDetail(j) {
   `;
   const cancelBtn = $("#cancel-btn");
   if (cancelBtn) cancelBtn.onclick = () => doCancel(j.id);
-  const confirmSubmit = $("#confirm-submit");
-  if (confirmSubmit) confirmSubmit.onclick = () => doResume(j.id);
-  const confirmCancel = $("#confirm-cancel");
-  if (confirmCancel) confirmCancel.onclick = () => hideConfirmPanel();
-  if (j.status === "paused" && j.require_confirm) showConfirmPanel();
   if (j.pptx_path) showDownload(`/api/jobs/${j.id}/pptx`);
   state.events = [];
   state.lastSeq = 0;
@@ -421,8 +394,6 @@ function appendTimeline({ type, label, detail }) {
   tl.scrollTop = tl.scrollHeight;
 }
 
-function showConfirmPanel() { const s = $("#confirm-section"); if (s) s.style.display = "block"; }
-function hideConfirmPanel() { const s = $("#confirm-section"); if (s) s.style.display = "none"; }
 function showDownload(url) {
   const sec = $("#download-section"); const a = $("#download-link");
   if (sec && a) { sec.style.display = "block"; a.href = url; }
@@ -434,17 +405,6 @@ async function doCancel(jobId) {
     await api("POST", `/api/jobs/${jobId}/cancel`);
     refreshList();
   } catch (e) { alert("取消失败: " + e.message); }
-}
-
-async function doResume(jobId) {
-  const text = $("#confirm-text").value.trim();
-  if (!text) { alert("请输入确认内容"); return; }
-  try {
-    const fd = new FormData();
-    fd.append("confirm", text);
-    await api("POST", `/api/jobs/${jobId}/resume`, fd);
-    hideConfirmPanel();
-  } catch (e) { alert("恢复失败: " + e.message); }
 }
 
 // ── 启动 ─────────────────────────────────────────────────────

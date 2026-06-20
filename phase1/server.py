@@ -263,18 +263,13 @@ async def create_job(
     user: CurrentUser,
     prompt: Annotated[str, Form(min_length=1, max_length=20000)],
     project_name: Annotated[str | None, Form()] = None,
-    require_confirm: Annotated[bool, Form()] = False,
     files: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
     """新建 job + staging 上传文件 + 启动后台生成。
 
-    require_confirm（默认 false）：
-      true  → stage 3 end_turn 时切 paused，弹前端确认面板
-      false → 自动 resume 让 agent 继续出 pptx
-
     流程：
       1. 校验 prompt / 单活动 job 锁 / 配额
-      2. 建 Job 行（带 user_id + require_confirm）
+      2. 建 Job 行（user_id）
       3. mkdir uploads + project_root
       4. 流式写上传文件，校验大小 + 路径
       5. 预扣 1 credit（事务里）
@@ -299,7 +294,8 @@ async def create_job(
             prompt=prompt,
             project_name=pname,
             status="queued",
-            require_confirm=bool(require_confirm),
+            # require_confirm 字段保留（DB schema 兼容），但永远 = False
+            require_confirm=False,
         ))
         s.commit()
 
