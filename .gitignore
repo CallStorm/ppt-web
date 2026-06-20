@@ -1,0 +1,16 @@
+.venv/
+.phase0/
+.phase0_preview/
+.phase0_*.log
+__pycache__/
+*.pyc
+jobs.db
+jobs.db-journal
+jobs.db-wal
+jobs.db-shm
+# Phase 2: per-user data (uploads, projects, etc.)
+data/
+# ppt-master 用户项目产物（按需保留）
+# （注：ppt-master 整体是 submodule，下面这行只对本地偶尔解包场景生效）
+ppt-master/projects/*/
+!ppt-master/projects/.gitkeep
