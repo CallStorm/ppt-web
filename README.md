@@ -5,6 +5,8 @@
 - **phase0** — CLI 壳，调试用（`python phase0/orchestrator.py run --prompt "..."`）
 - **backend + webui** — FastAPI 后端 + React 前端（含鉴权、多用户隔离、文件上传）
 
+**项目定位**：本项目是个人探索实验，重点是探索如何以可管控的方式利用 Claude Code 的 agent 能力：以 Docker 隔离每个 PPT 生成任务、运行后自毁，在保护宿主与用户隐私的前提下交付可下载的产物。
+
 - 设计摘要：[DESIGN.md](./DESIGN.md)
 - 完整文档：[Docs/README.md](./Docs/README.md)
 - phase0 验证报告：[phase0/REPORT.md](./phase0/REPORT.md)
