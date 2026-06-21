@@ -15,6 +15,19 @@
 
 > 可编辑源文件：[Docs/architecture/ppt-web-architecture.drawio](./Docs/architecture/ppt-web-architecture.drawio)（draw.io / diagrams.net）
 
+## 示例作品
+
+以下 4 个 PPT 由本项目（`ppt-web` + `ppt-master`）端到端自动生成，涵盖技术分享、产品介绍、协议讲解等不同场景。点击文件名即可下载到本地，用 PowerPoint / Keynote / WPS 打开查看效果。
+
+| 示例 | 主题 | 文件 |
+|------|------|------|
+| 1 | 产品介绍 — 智能硬件 | [AI语音闹钟.pptx](./examples/AI语音闹钟.pptx) |
+| 2 | 技术分享 — RAG 检索增强生成 | [rag技术分享.pptx](./examples/rag技术分享.pptx) |
+| 3 | 协议讲解 — 计算机网络 | [TCP_IP协议介绍.pptx](./examples/TCP_IP协议介绍.pptx) |
+| 4 | 产品介绍 — 运动器材 | [漂移板介绍.pptx](./examples/漂移板介绍.pptx) |
+
+> 所有源文件位于 [`examples/`](./examples/) 目录；如需自己跑一遍同款，在 WebUI「创建任务」里粘贴对应 prompt 即可（见 `phase0/REPORT.md` 里的成功 prompt 模板）。
+
 ## 界面预览
 
 ### 作品列表
@@ -211,19 +224,6 @@ uvicorn 进程（API 层）
 Admin API 文档：`/docs` → `admin` tag（需 admin 角色 cookie）。
 
 界面示意见上文 [管理后台](#管理后台)。
-
-## 示例作品
-
-以下 4 个 PPT 由本项目（`ppt-web` + `ppt-master`）端到端自动生成，涵盖技术分享、产品介绍、协议讲解等不同场景。点击文件名即可下载到本地，用 PowerPoint / Keynote / WPS 打开查看效果。
-
-| 示例 | 主题 | 文件 |
-|------|------|------|
-| 1 | 产品介绍 — 智能硬件 | [AI语音闹钟.pptx](./examples/AI语音闹钟.pptx) |
-| 2 | 技术分享 — RAG 检索增强生成 | [rag技术分享.pptx](./examples/rag技术分享.pptx) |
-| 3 | 协议讲解 — 计算机网络 | [TCP_IP协议介绍.pptx](./examples/TCP_IP协议介绍.pptx) |
-| 4 | 产品介绍 — 运动器材 | [漂移板介绍.pptx](./examples/漂移板介绍.pptx) |
-
-> 所有源文件位于 [`examples/`](./examples/) 目录；如需自己跑一遍同款，在 WebUI「创建任务」里粘贴对应 prompt 即可（见 `phase0/REPORT.md` 里的成功 prompt 模板）。
 
 ## 鉴权密钥
 
