@@ -1,12 +1,11 @@
 # ppt-web
 
-`ppt-web` 是围绕 [ppt-master](https://github.com/) 的 web 化封装项目。ppt-master 是生成 PPT 的核心 agent + 技能系统；本项目把它包成「开箱即用」的服务，分三阶段渐进：
+`ppt-web` 是围绕 [ppt-master](https://github.com/) 的 web 化封装项目。ppt-master 是生成 PPT 的核心 agent + 技能系统；本项目把它包成「开箱即用」的服务：
 
 - **phase0** — CLI 壳，调试用（`python phase0/orchestrator.py run --prompt "..."`）
-- **backend** — FastAPI Web 服务 + React 前端（`webui/`）
-- **phase2** — 鉴权 + 多用户隔离 + multipart 上传
+- **backend + webui** — FastAPI 后端 + React 前端（含鉴权、多用户隔离、文件上传）
 
-设计文档：[DESIGN.md](./DESIGN.md)。每个 phase 自己的 `REPORT.md` 记实现笔记。
+设计文档：[DESIGN.md](./DESIGN.md)。phase0 的 `REPORT.md` 记实现笔记。
 
 ## 快速开始
 
@@ -193,18 +192,19 @@ ppt-web/
 │   └── README.md
 ├── backend/               # FastAPI 后端（启动：backend.main:app）
 │   ├── main.py            # 应用入口
-│   ├── api/               # HTTP 路由
-│   ├── runtime/           # 调度、SSE、队列
-│   ├── runner/            # Claude 执行
-│   └── requirements.txt
+│   ├── api/routes/        # auth, jobs, health, spa
+│   ├── auth/              # JWT, passwords
+│   ├── db/                # migrations, session
+│   ├── models/
+│   ├── runtime/           # dispatcher, queue, SSE, watchdog
+│   ├── runner/            # claude, docker, sync, preview
+│   └── scripts/smoke.py
 ├── webui/                 # React 前端
-│   ├── server.py          # 入口
-│   ├── core.py            # agent 调用 + 流式事件 + 8 点确认已默认关闭
-│   ├── auth.py / models.py / db.py / paths.py / config.py / admin.py / bootstrap.py
-│   ├── static/            # 前端
-│   └── _smoke.py          # 不接 HTTP 的烟雾测试
-├── phase2/                # 鉴权 + 多用户（部分就位）
-│   └── REPORT.md
+│   ├── src/pages/
+│   ├── src/components/
+│   ├── src/hooks/
+│   └── src/api/
+├── docker/ppt-runner/
 ├── data/                  # 运行时用户数据（gitignored）
 └── ppt-master/            # ← git submodule
 ```
