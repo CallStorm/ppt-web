@@ -5,32 +5,144 @@
 - **phase0** — CLI 壳，调试用（`python phase0/orchestrator.py run --prompt "..."`）
 - **backend + webui** — FastAPI 后端 + React 前端（含鉴权、多用户隔离、文件上传）
 
-设计文档：[DESIGN.md](./DESIGN.md)。phase0 的 `REPORT.md` 记实现笔记。
+- 设计摘要：[DESIGN.md](./DESIGN.md)
+- 完整文档：[Docs/README.md](./Docs/README.md)
+- phase0 验证报告：[phase0/REPORT.md](./phase0/REPORT.md)
+
+## 界面预览
+
+### 作品列表
+
+![作品列表](./images/list.png)
+
+登录后的主页，以卡片形式展示已生成的 PPT，支持搜索和按状态筛选（运行中 / 完成 / 失败）。顶部可进入「创建」与「管理后台」。
+
+### 创建任务
+
+![创建任务](./images/new.png)
+
+填写项目名称、上传参考素材（PDF / DOCX / PPTX 等）、内容描述；可选语言、场景、受众、语调、页数，提交后启动 agent 生成。
+
+### 任务详情
+
+![任务详情](./images/detail.png)
+
+点击作品进入详情页，查看任务状态、费用、生成选项；通过 Tab 切换概览、原始输出、时间线、产物；可下载 `.pptx`，底部展示 Agent 各阶段执行进度。
+
+### 管理后台
+
+![管理后台](./images/admin.png)
+
+管理员专用（`#/admin`），含概览、用户、任务、设置四个 Tab。设置页可配置并发上限、Docker runner 参数，以及 Claude / Cloud 所需的 `ANTHROPIC_*` 模型与 API 信息；用户与任务管理见下文 [Admin 管理后台](#admin-管理后台) 章节。
+
+## 前置要求
+
+| 依赖 | 版本建议 | 用途 |
+|------|----------|------|
+| Docker | 最新稳定版 | MySQL 容器 + 每 job 执行容器（**必需**） |
+| Python | 3.11+ | 后端 API |
+| Node.js | 18+ | 前端构建 |
+| git | — | clone 含 submodule |
 
 ## 快速开始
 
+按顺序执行以下步骤。基础设施（MySQL、ppt-runner 镜像）必须先就绪，再启动应用。
+
+### 1. 启动 MySQL（Docker）
+
 ```bash
-# 1. clone（含 submodule）
+# 首次创建（已存在则跳过，用 docker start ppt-mysql 重启）
+docker run -d --name ppt-mysql \
+  -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=pptweb \
+  -e MYSQL_USER=pptweb \
+  -e MYSQL_PASSWORD=pptweb \
+  -v ppt-mysql-data:/var/lib/mysql \
+  mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+```
+
+库字符集必须是 **utf8mb4**（不是 utf8，否则 emoji 会被截断）。
+
+验证 MySQL 已就绪：
+
+```bash
+docker ps --filter name=ppt-mysql
+# 或：docker exec ppt-mysql mysqladmin ping -h localhost -u root -proot
+```
+
+### 2. 构建 ppt-runner 镜像与网桥
+
+每个 PPT 生成任务在独立 Docker 容器内执行，**必须先 build 镜像**（同时创建 `ppt-isolated` bridge 网络）：
+
+```bash
+bash docker/ppt-runner/build.sh
+# 首次约 5–10 分钟，产出 ppt-runner:latest（~1.5GB）
+```
+
+### 3. 克隆仓库
+
+```bash
 git clone --recursive <repo-url>
 cd ppt-web
+```
 
-# 2. 建虚拟环境 + 装依赖
+> ⚠️ **必须带 `--recursive`**，否则 `ppt-master/` 是空目录。
+
+若已 clone 未初始化 submodule：
+
+```bash
+git submodule update --init --recursive
+```
+
+### 4. Python 环境 + 配置 .env
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 
-# 3.（可选）配 .env
 cp .env.example .env
-# 编辑 .env 设 DB_URL / JWT_SECRET 等
-
-# 4. 构建前端（React SPA，源码在 webui/）
-cd webui && npm install && npm run build && cd ..
-
-# 5. 启动 Web 服务（同时托管 webui/dist 界面）
-.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
-
-# 6. 浏览器打开
-open http://127.0.0.1:8765/
 ```
+
+编辑 `.env`，至少填写：
+
+```bash
+DB_URL=mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4
+PPT_WEB_JWT_SECRET=$(openssl rand -hex 32)
+# Claude API（也可在 Admin 后台配置）
+ANTHROPIC_AUTH_TOKEN=sk-...
+```
+
+### 5. 构建前端
+
+```bash
+cd webui && npm install && npm run build && cd ..
+```
+
+产物在 `webui/dist/`，由 FastAPI 托管。
+
+### 6. 启动服务
+
+```bash
+.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
+```
+
+或使用便捷脚本（自动检测 dist 是否存在）：
+
+```bash
+bash scripts/dev-web.sh
+```
+
+第一次启动会自动跑 DB 迁移（`v1→v6`）。
+
+### 7. 验证
+
+```bash
+open http://127.0.0.1:8765/
+curl http://127.0.0.1:8765/api/health
+```
+
+注册账号并登录。默认管理员：**admin / admin**（生产环境请立即改密）。
 
 **前端开发（HMR）：** 后端与前端分两个终端跑，Vite 会把 `/api` 代理到 `:8765`：
 
@@ -43,58 +155,9 @@ cd webui && npm run dev
 # 打开 http://127.0.0.1:5173
 ```
 
-也可使用便捷脚本（自动检测 dist 是否存在）：
-
-```bash
-bash scripts/dev-web.sh
-```
-
-第一次启动会自动跑 DB 迁移（`v1→v2→v3`）。
-
-## 数据库
-
-**默认 SQLite**（`./jobs.db`，零依赖，适合本地开发）。
-**生产推荐 MySQL**（或 Postgres），通过 `DB_URL` 环境变量切：
-
-```bash
-# 本地起一个 MySQL 8 docker
-docker run -d --name ppt-mysql \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=root \
-  -e MYSQL_DATABASE=pptweb \
-  -e MYSQL_USER=pptweb \
-  -e MYSQL_PASSWORD=pptweb \
-  -v ppt-mysql-data:/var/lib/mysql \
-  mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-
-# 切到 MySQL 启动
-DB_URL="mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4" \
-  .venv/bin/uvicorn backend.main:app
-```
-
-支持的 URL scheme：
-
-| 驱动 | URL 前缀 | 备注 |
-|---|---|---|
-| SQLite（默认） | `sqlite:///./jobs.db` | 本地零依赖 |
-| MySQL | `mysql+pymysql://…` | 需 `pip install pymysql`；库字符集 `utf8mb4` |
-| Postgres | `postgresql+psycopg2://…` | 需 `pip install psycopg2-binary` |
-
-迁移（`v1→v2→v3`）和 PRAGMA（WAL）都做了 DB 类型判断，SQLite 本地开发 + MySQL 部署可以无缝切换。
-
 ## Job 隔离：每 job 一个 Docker 容器
 
-每个生成任务在临时容器里跑，跑完自动销毁（`--rm`）。**这是唯一的执行方式**——需要先 build 镜像并确保 Docker daemon 可用。
-
-```bash
-# 1. 一次性 build 镜像
-bash docker/ppt-runner/build.sh
-# 等 5-10 分钟，build 完一个 ~1.5GB 的 ppt-runner:latest 镜像
-
-# 2. 启动服务
-.venv/bin/uvicorn backend.main:app
-# 或：bash scripts/dev-web.sh
-```
+每个生成任务在临时容器里跑，跑完自动销毁（`--rm`）。镜像与网桥在快速开始步骤 2 已构建。
 
 镜像里包含：`python 3.11 + claude CLI + ppt-master 源码 + ppt-master 依赖 + 中英文字体`。每 job 起一个容器，per-user 写目录 mount 进 `/work`，claude 退出或超时后自动销毁。
 
@@ -117,7 +180,7 @@ uvicorn 进程（API 层）
 |---|---|---|
 | `MAX_CONCURRENT_JOBS` | `3` | 全局最多同时跑几个生成任务；超过后返回 409 |
 | `DOCKER_RUNNER_IMAGE` | `ppt-runner:latest` | 镜像名 |
-| `DOCKER_RUNNER_NETWORK` | `ppt-isolated` | bridge 网络（用 `build.sh` 自动建） |
+| `DOCKER_RUNNER_NETWORK` | `ppt-isolated` | bridge 网络（`build.sh` 自动建） |
 | `DOCKER_RUNNER_MEMORY` | `4g` | 单 job 内存上限 |
 | `DOCKER_RUNNER_CPUS` | `2` | 单 job CPU 份额 |
 | `DOCKER_RUNNER_TIMEOUT_S` | `1800` | 单 job 超时（秒），超时强杀 |
@@ -141,6 +204,8 @@ uvicorn 进程（API 层）
 
 Admin API 文档：`/docs` → `admin` tag（需 admin 角色 cookie）。
 
+界面示意见上文 [管理后台](#管理后台)。
+
 ## 鉴权密钥
 
 开发/生产都建议固定 JWT secret，否则服务一重启登录态就会失效：
@@ -150,7 +215,6 @@ openssl rand -hex 32
 # 把输出写入 .env：
 PPT_WEB_JWT_SECRET=<上一步输出>
 ```
-
 
 ## 生成行为
 
@@ -172,17 +236,19 @@ git pull origin main
 cd ..
 git add ppt-master
 git commit -m "chore: bump ppt-master to <version>"
+# 升级后需重新 build runner 镜像：
+bash docker/ppt-runner/build.sh
 ```
 
 本仓的 `.gitmodules` 指向 `https://github.com/CallStorm/ppt-master.git`（fork）。
-
-> ⚠️ **clone 时一定要带 `--recursive`**，否则 `ppt-master/` 是空目录。
 
 ## 目录结构
 
 ```
 ppt-web/
-├── DESIGN.md              # 整体设计稿
+├── DESIGN.md              # 设计摘要与实现状态索引
+├── Docs/                  # 完整文档（product/architecture/design/development/deployment/reference）
+├── images/                # README 界面截图
 ├── README.md              # 本文件
 ├── .env.example           # 环境变量示例（cp 成 .env 用）
 ├── .gitignore
@@ -212,6 +278,19 @@ ppt-web/
 ## 跑测试
 
 ```bash
-# 端到端 smoke（要 claude CLI 在 PATH，会烧 token）
+# 端到端 smoke（需要 Docker + Claude API，会烧 token）
 .venv/bin/python backend/scripts/smoke.py "写一份 4 页 Python 简介 PPT"
 ```
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [Docs/README.md](./Docs/README.md) | 文档导航 |
+| [DESIGN.md](./DESIGN.md) | 设计摘要与实现状态 |
+| [Docs/product.md](./Docs/product.md) | 产品 |
+| [Docs/architecture.md](./Docs/architecture.md) | 架构 |
+| [Docs/design.md](./Docs/design.md) | 设计（详细） |
+| [Docs/development.md](./Docs/development.md) | 开发 |
+| [Docs/deployment.md](./Docs/deployment.md) | 部署 |
+| [Docs/reference.md](./Docs/reference.md) | 参考 |
