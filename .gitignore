@@ -17,3 +17,6 @@ data/
 # （注：ppt-master 整体是 submodule，下面这行只对本地偶尔解包场景生效）
 ppt-master/projects/*/
 !ppt-master/projects/.gitkeep
+# WebUI frontend
+webui/node_modules/
+webui/dist/

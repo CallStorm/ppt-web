@@ -3,7 +3,7 @@
 `ppt-web` 是围绕 [ppt-master](https://github.com/) 的 web 化封装项目。ppt-master 是生成 PPT 的核心 agent + 技能系统；本项目把它包成「开箱即用」的服务，分三阶段渐进：
 
 - **phase0** — CLI 壳，调试用（`python phase0/orchestrator.py run --prompt "..."`）
-- **phase1** — FastAPI 单页 Web MVP（`/docs` 看 API 文档）
+- **backend** — FastAPI Web 服务 + React 前端（`webui/`）
 - **phase2** — 鉴权 + 多用户隔离 + multipart 上传
 
 设计文档：[DESIGN.md](./DESIGN.md)。每个 phase 自己的 `REPORT.md` 记实现笔记。
@@ -17,17 +17,37 @@ cd ppt-web
 
 # 2. 建虚拟环境 + 装依赖
 python3 -m venv .venv
-.venv/bin/pip install -r phase1/requirements.txt
+.venv/bin/pip install -r backend/requirements.txt
 
 # 3.（可选）配 .env
 cp .env.example .env
 # 编辑 .env 设 DB_URL / JWT_SECRET 等
 
-# 4. 启动 Web 服务
-.venv/bin/uvicorn phase1.server:app --host 127.0.0.1 --port 8765
+# 4. 构建前端（React SPA，源码在 webui/）
+cd webui && npm install && npm run build && cd ..
 
-# 5. 浏览器打开
+# 5. 启动 Web 服务（同时托管 webui/dist 界面）
+.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
+
+# 6. 浏览器打开
 open http://127.0.0.1:8765/
+```
+
+**前端开发（HMR）：** 后端与前端分两个终端跑，Vite 会把 `/api` 代理到 `:8765`：
+
+```bash
+# 终端 1 — API
+.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
+
+# 终端 2 — 前端热更新
+cd webui && npm run dev
+# 打开 http://127.0.0.1:5173
+```
+
+也可使用便捷脚本（自动检测 dist 是否存在）：
+
+```bash
+bash scripts/dev-web.sh
 ```
 
 第一次启动会自动跑 DB 迁移（`v1→v2→v3`）。
@@ -50,7 +70,7 @@ docker run -d --name ppt-mysql \
 
 # 切到 MySQL 启动
 DB_URL="mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4" \
-  .venv/bin/uvicorn phase1.server:app
+  .venv/bin/uvicorn backend.main:app
 ```
 
 支持的 URL scheme：
@@ -65,19 +85,19 @@ DB_URL="mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4" \
 
 ## Job 隔离：每 job 一个 Docker 容器
 
-每个生成任务在一个临时容器里跑，跑完自动销毁（`--rm`）。**这是方案 2（推荐给多用户/对外场景）**。
+每个生成任务在临时容器里跑，跑完自动销毁（`--rm`）。**这是唯一的执行方式**——需要先 build 镜像并确保 Docker daemon 可用。
 
 ```bash
 # 1. 一次性 build 镜像
 bash docker/ppt-runner/build.sh
 # 等 5-10 分钟，build 完一个 ~1.5GB 的 ppt-runner:latest 镜像
 
-# 2. 启用 docker runner 启动
-export USE_DOCKER_RUNNER=true
-.venv/bin/uvicorn phase1.server:app
+# 2. 启动服务
+.venv/bin/uvicorn backend.main:app
+# 或：bash scripts/dev-web.sh
 ```
 
-镜像里包含：`python 3.11 + claude CLI + ppt-master 源码 + ppt-master 依赖 + 中英文字体`。每 job 起一个容器，per-user 写目录 mount 进 `/work`，claude 退出或 30 分钟超时后自动销毁。
+镜像里包含：`python 3.11 + claude CLI + ppt-master 源码 + ppt-master 依赖 + 中英文字体`。每 job 起一个容器，per-user 写目录 mount 进 `/work`，claude 退出或超时后自动销毁。
 
 **架构**：
 
@@ -85,19 +105,11 @@ export USE_DOCKER_RUNNER=true
 uvicorn 进程（API 层）
   └─ docker run --rm -i \
        --name ppt-job-<job_id> \
-       -v data/users/<uid>/projects/<job_id>/:/work \
+       -v data/users/<uid>/:/work \
        -e PROMPT=... -e JOB_ID=... \
        -e ANTHROPIC_AUTH_TOKEN=... \
        --memory=4g --cpus=2 --network=ppt-isolated \
        ppt-runner:latest
-```
-
-**关掉 = 走老路**（host 上直接 Popen `claude`，cwd=`ppt-master/`，适合本地快速开发）：
-
-```bash
-# 不设 USE_DOCKER_RUNNER，或：
-unset USE_DOCKER_RUNNER
-.venv/bin/uvicorn phase1.server:app
 ```
 
 **可调环境变量**（都列在 `.env.example`）：
@@ -105,7 +117,6 @@ unset USE_DOCKER_RUNNER
 | 变量 | 默认 | 含义 |
 |---|---|---|
 | `MAX_CONCURRENT_JOBS` | `3` | 全局最多同时跑几个生成任务；超过后返回 409 |
-| `USE_DOCKER_RUNNER` | `false` | 是否走 docker |
 | `DOCKER_RUNNER_IMAGE` | `ppt-runner:latest` | 镜像名 |
 | `DOCKER_RUNNER_NETWORK` | `ppt-isolated` | bridge 网络（用 `build.sh` 自动建） |
 | `DOCKER_RUNNER_MEMORY` | `4g` | 单 job 内存上限 |
@@ -113,6 +124,23 @@ unset USE_DOCKER_RUNNER
 | `DOCKER_RUNNER_TIMEOUT_S` | `1800` | 单 job 超时（秒），超时强杀 |
 
 > ⚠️ Docker 模式下 ppt-master 子脚本的硬编码端口问题**自动消失**（每个容器独立 netns）。
+
+## Admin 管理后台
+
+首次启动会自动创建默认管理员：**账号 `admin`，密码 `admin`**（已存在则不覆盖密码）。
+
+1. 登录后侧边栏出现「管理后台」，或直接访问 `#/admin`
+2. 可在设置页配置：
+   - **最大并发审核任务数 / 启动容器数上限**（1–50）
+   - Docker runner（镜像、内存、CPU、超时等）
+   - **Claude Code 容器环境变量**（`ANTHROPIC_*` 模型/API、Secrets、自定义 env）
+   - Watchdog 参数
+3. 用户管理：改 role/quota/重置密码
+4. 任务管理：全站列表、取消、标记失败、手动退款
+
+配置修改后**仅对新启动的任务/容器生效**。生产环境务必第一时间修改默认 admin 密码。
+
+Admin API 文档：`/docs` → `admin` tag（需 admin 角色 cookie）。
 
 ## 鉴权密钥
 
@@ -163,10 +191,16 @@ ppt-web/
 │   ├── orchestrator.py
 │   ├── fix_preview_fonts.py
 │   └── README.md
-├── phase1/                # FastAPI Web MVP
+├── backend/               # FastAPI 后端（启动：backend.main:app）
+│   ├── main.py            # 应用入口
+│   ├── api/               # HTTP 路由
+│   ├── runtime/           # 调度、SSE、队列
+│   ├── runner/            # Claude 执行
+│   └── requirements.txt
+├── webui/                 # React 前端
 │   ├── server.py          # 入口
 │   ├── core.py            # agent 调用 + 流式事件 + 8 点确认已默认关闭
-│   ├── auth.py / models.py / db.py / paths.py
+│   ├── auth.py / models.py / db.py / paths.py / config.py / admin.py / bootstrap.py
 │   ├── static/            # 前端
 │   └── _smoke.py          # 不接 HTTP 的烟雾测试
 ├── phase2/                # 鉴权 + 多用户（部分就位）
@@ -179,5 +213,5 @@ ppt-web/
 
 ```bash
 # 端到端 smoke（要 claude CLI 在 PATH，会烧 token）
-.venv/bin/python phase1/_smoke.py "写一份 4 页 Python 简介 PPT"
+.venv/bin/python backend/scripts/smoke.py "写一份 4 页 Python 简介 PPT"
 ```

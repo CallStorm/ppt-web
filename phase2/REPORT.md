@@ -15,7 +15,7 @@
 └────────────┬───────────────────────────────────────────────┘
              │  fetch (credentials: 'same-origin')
 ┌────────────▼───────────────────────────────────────────────┐
-│ FastAPI  (phase1/server.py)                                │
+│ FastAPI  (backend/main.py)                                │
 │  /api/auth/{register,login,logout,me}                      │
 │  /api/jobs               (multipart: prompt + files)        │
 │  /api/jobs/{id}/{events,pptx,resume,cancel}                │
@@ -24,7 +24,7 @@
 └────────────┬───────────────────────────────────────────────┘
              │
 ┌────────────▼───────────────────────────────────────────────┐
-│ phase1/core.py  (run_job / resume_job 编排)                │
+│ backend/runtime/  (run_job / resume_job 编排)                │
 │   ↑ 从 Job 行读 user_id → project_root_for(uid, job_id)    │
 │   ↑ build_initial_prompt 注入 project_root + upload 列表    │
 │   ↑ run_sync / resume_sync 用 per-user project_root         │
@@ -66,19 +66,14 @@ ppt-web/
 │       ├── uploads/<job_id>/       # 原始上传
 │       └── projects/<job_id>/      # 该 job 的 project_root
 │           └── projects/<name>_<format>_<date>/   # ppt-master 建
-├── phase1/
-│   ├── core.py                     # ★ 改：run_job 读 Job.user_id + 用 project_root_for
-│   ├── db.py                       # ★ 改：migrate_v1_to_v2 + User 表
-│   ├── models.py                   # ★ 改：User + Job.user_id + 组合索引
-│   ├── auth.py                     # ★ 新：JWT + bcrypt + get_current_user
-│   ├── paths.py                    # ★ 新：project_root_for / safe_stage_name / is_under
-│   ├── server.py                   # ★ 改：auth 端点 + ownership 校验 + multipart 上传
-│   ├── static/
-│   │   ├── index.html              # ★ 改：单 #app 容器
-│   │   ├── app.js                  # ★ 改：auth 状态机 + 上传 + credentials
-│   │   └── styles.css              # ★ 改：auth + main header 样式
-│   ├── _smoke.py                   # ★ 改：建 smoke@local 用户
-│   └── requirements.txt            # ★ 改：+ passlib / jose / python-multipart / bcrypt<4.2
+├── backend/                        # FastAPI 后端（backend.main:app）
+│   ├── main.py                     # app 入口 + lifespan
+│   ├── api/routes/                 # auth, jobs, health, spa
+│   ├── runtime/                    # dispatcher, events, queue, watchdog
+│   ├── runner/                     # claude 执行 + sync CLI
+│   ├── auth/, db/, models/, admin/
+│   └── scripts/smoke.py            # 无 HTTP 冒烟测试
+├── webui/                          # React SPA（Vite 构建 → webui/dist）
 ├── phase2/
 │   └── REPORT.md                   # ← 本文件
 └── ppt-master/                     # 仓库自带，未改
@@ -92,8 +87,8 @@ ppt-web/
 
 ```bash
 rm -f jobs.db jobs.db-wal jobs.db-shm  # 首次会触发 migrate_v1_to_v2
-PPT_WEB_JWT_SECRET="<32+ char random>" .venv/bin/uvicorn phase1.server:app --host 127.0.0.1 --port 8765
-# → INFO phase1 server ready
+PPT_WEB_JWT_SECRET="<32+ char random>" .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
+# → INFO backend server ready
 ```
 
 **生产必设 `PPT_WEB_JWT_SECRET`**：dev 模式启动时会随机生成并 console warning，但重启即失效，所有 token 失效。
@@ -239,7 +234,7 @@ sqlite3 jobs.db "SELECT seq, type, substr(payload,1,200) FROM events WHERE job_i
 
 ### 改上传大小限制
 
-`phase1/server.py` 顶部：
+`backend/api/routes/jobs.py` 顶部：
 ```python
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024
@@ -255,7 +250,7 @@ curl http://127.0.0.1:8765/api/health
 # → {"ok":true,"active_job":false}
 
 # 2) Phase 1 核心未回归
-.venv/bin/python phase1/_smoke.py "4 页 Python 入门"
+.venv/bin/python backend/scripts/smoke.py "4 页 Python 入门"
 # → job 创建 → agent 跑 init + import-sources → 30s 后 cancel
 # 验证：data/users/<smoke_uid>/projects/<job_id>/<name>_<fmt>_<date>/sources/ 有内容
 

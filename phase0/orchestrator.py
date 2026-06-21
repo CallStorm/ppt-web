@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 0 编排器 CLI 壳。
 
-核心逻辑在 `phase1.core`（run_sync / resume_sync / stream_claude / classify_stage）。
+核心逻辑在 `backend.runner`（run_sync / resume_sync / stream_claude / classify_stage）。
 本脚本只负责 argparse + 同步消费事件打到终端时间线 —— 与 Phase 1 FastAPI server
 共用同一份 core 代码，避免双份维护。
 
@@ -17,11 +17,11 @@ import sys
 import time
 from pathlib import Path
 
-# 让 import phase1.core 找到包
+# 让 import backend.runner 找到包
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from phase1.core import resolve_project_dir, find_pptx, run_sync, resume_sync  # noqa: E402
+from backend.runner import find_pptx, resolve_project_dir, resume_sync, run_sync  # noqa: E402
 
 STATE_FILE = HERE.parent / ".phase0" / "state.json"
 
