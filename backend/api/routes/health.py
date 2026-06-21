@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.config import get_runtime_config
+from backend.config import get_display_timezone, get_runtime_config
 from backend.runtime import active_count, active_job_ids, is_active, queue_count
 
 router = APIRouter(tags=["health"])
@@ -16,4 +16,5 @@ async def health() -> dict:
         "active_job_ids": active_job_ids(),
         "queue_length": queue_count(),
         "max_concurrent_jobs": cfg.max_concurrent_jobs,
+        "display_timezone": get_display_timezone(),
     }

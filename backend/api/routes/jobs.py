@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import shutil
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -9,12 +10,18 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
 
-from backend.api.deps import get_job_or_404, job_to_dict, require_owner_or_admin
+from backend.api.deps import (
+    get_job_or_404,
+    job_to_dict,
+    require_owner_or_admin,
+    resolve_job_project_dir,
+)
 from backend.api.schemas.job_options import job_options_from_form
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
-from backend.paths import ensure_data_dirs, is_under, safe_stage_name, uploads_dir_for
+from backend.paths import ensure_data_dirs, is_under, project_root_for, safe_stage_name, uploads_dir_for
+from backend.runner.preview import find_cover_preview
 from backend.runtime import (
     cancel_active,
     is_active,
@@ -292,3 +299,65 @@ async def download_pptx(job_id: str, user: CurrentUser):
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=f"{j.project_name}.pptx",
     )
+
+
+_PREVIEW_MEDIA = {
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+}
+
+
+@router.get("/{job_id}/preview")
+async def download_preview(job_id: str, user: CurrentUser):
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+        project_dir = resolve_job_project_dir(j)
+        preview = find_cover_preview(project_dir)
+        if not preview:
+            raise HTTPException(404, "preview not ready")
+
+        allowed_roots = []
+        if j.user_id:
+            allowed_roots.append(project_root_for(j.user_id, j.id).resolve())
+        if j.project_dir:
+            allowed_roots.append(Path(j.project_dir).resolve().parent)
+
+        preview_resolved = preview.resolve()
+        if not any(is_under(preview_resolved, root) for root in allowed_roots):
+            raise HTTPException(403, "preview path forbidden")
+
+        media_type = _PREVIEW_MEDIA.get(preview.suffix.lower(), "application/octet-stream")
+        return FileResponse(preview, media_type=media_type)
+
+
+@router.delete("/{job_id}")
+async def delete_job(job_id: str, user: CurrentUser) -> dict:
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+        if j.status in ("running", "paused"):
+            raise HTTPException(400, "cannot delete a running job; cancel it first")
+        user_id = j.user_id
+
+    if is_active(job_id):
+        cancel_active(job_id)
+
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+        if j.status in ("running", "paused"):
+            raise HTTPException(400, "cannot delete a running job; cancel it first")
+        s.query(Event).filter(Event.job_id == job_id).delete()
+        s.delete(j)
+        s.commit()
+
+    if user_id:
+        uploads = uploads_dir_for(user_id, job_id)
+        projects = project_root_for(user_id, job_id)
+        for path in (uploads, projects):
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+
+    notify_dispatcher()
+    return {"id": job_id, "deleted": True}

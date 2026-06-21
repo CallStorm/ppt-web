@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
+import { APP_NAME } from '../lib/brand'
 import { useAuthStore } from '../stores/authStore'
 
 export function LoginPage() {
@@ -38,7 +39,7 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex h-14 items-center border-b border-slate-200 px-6 dark:border-slate-800">
-        <span className="text-lg font-semibold">ppt-web</span>
+        <span className="text-lg font-semibold">{APP_NAME}</span>
       </header>
       <main className="flex flex-1 items-center justify-center px-4 py-10">
         <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-md dark:bg-slate-900">

@@ -6,6 +6,7 @@ import { ToastHost } from './components/ui/Toast'
 import { ModalHost } from './components/ui/Modal'
 import { useAuthStore } from './stores/authStore'
 import { useThemeStore } from './stores/themeStore'
+import { setDisplayTimezone } from './lib/format'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,6 +21,12 @@ function Boot() {
   useEffect(() => {
     initTheme()
     boot()
+    fetch('/api/health')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.display_timezone) setDisplayTimezone(data.display_timezone)
+      })
+      .catch(() => {})
   }, [boot, initTheme])
 
   return (

@@ -2,8 +2,9 @@
 
 所有 per-user 数据的根：`<PROJECT_ROOT>/data/users/<user_id>/`
   - uploads/<job_id>/<filename>  原始上传
-  - projects/<job_id>/           该 job 的 project_root（cwd 仍 ppt-master，但 init --dir 指向这里）
-    - projects/<name>_<format>_<date>/  ← ppt-master 自己 init 时建出来
+  - projects/<job_id>/           该 job 的 project_root（agent init --dir 指向这里）
+    - <name>_<format>_<date>/    ← 实际产物目录（直接建在 project_root 下）
+    - projects/<name>_.../      ← 部分环境可能多一层 projects/，resolve 两处都查
 """
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ def uploads_dir_for(user_id: str, job_id: str) -> Path:
 def project_root_for(user_id: str, job_id: str) -> Path:
     """per-user project root。agent 用 `init <name> --dir <这里>`。
 
-    ppt-master 自己会在该目录下再建 `projects/<name>_<format>_<date>/`。
+    产物目录通常为 `<root>/<name>_<format>_<date>/`（见 resolve_project_dir）。
     """
     return user_dir(user_id) / "projects" / job_id
 

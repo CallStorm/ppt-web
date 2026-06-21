@@ -42,9 +42,9 @@ export function DashboardPage() {
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">我的任务</h1>
+          <h1 className="text-xl font-semibold">我的作品</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            共 {jobs.length} 个任务
+            共 {jobs.length} 个作品
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -52,7 +52,7 @@ export function DashboardPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索任务…"
+            placeholder="搜索作品…"
             className="w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-gemini-500 focus:outline-none sm:w-56 dark:border-slate-700 dark:bg-slate-800"
           />
           <div className="flex items-center gap-1 text-xs">
@@ -82,19 +82,19 @@ export function DashboardPage() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-sm text-slate-400">
-            {jobs.length === 0 ? '还没有任务' : '没有匹配的任务'}
+            {jobs.length === 0 ? '还没有作品' : '没有匹配的作品'}
           </p>
           {jobs.length === 0 && (
             <Link
               to="/jobs/new"
               className="mt-4 rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
             >
-              新建任务
+              创建
             </Link>
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
           {filtered.map((job) => (
             <JobCard key={job.id} job={job} />
           ))}

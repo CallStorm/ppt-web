@@ -1,4 +1,5 @@
 import { Link, Outlet, useNavigate } from 'react-router-dom'
+import { APP_NAME } from '../../lib/brand'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
 
@@ -19,14 +20,14 @@ export function AppShell() {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 flex h-14 items-center border-b border-slate-200 bg-white/80 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
         <Link to="/" className="mr-6 text-base font-semibold">
-          ppt-web
+          {APP_NAME}
         </Link>
         <nav className="flex items-center gap-1 text-sm">
           <Link
             to="/jobs/new"
             className="rounded-md bg-gemini-600 px-3 py-1.5 font-medium text-white hover:bg-gemini-700"
           >
-            新建任务
+            创建
           </Link>
           {isAdmin() && (
             <Link

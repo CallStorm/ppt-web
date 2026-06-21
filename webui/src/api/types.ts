@@ -46,6 +46,7 @@ export interface Job {
   created_at: string | null
   updated_at: string | null
   queue_position: number | null
+  has_preview?: boolean
 }
 
 export interface JobListResponse {

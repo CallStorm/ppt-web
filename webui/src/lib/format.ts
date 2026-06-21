@@ -1,25 +1,51 @@
+export const DEFAULT_TIMEZONE =
+  import.meta.env.VITE_DISPLAY_TIMEZONE?.trim() || 'Asia/Shanghai'
+
+let configuredTimezone = DEFAULT_TIMEZONE
+
+export function setDisplayTimezone(tz: string) {
+  if (tz.trim()) configuredTimezone = tz.trim()
+}
+
+export function getDisplayTimezone(): string {
+  return configuredTimezone
+}
+
+/** Parse server ISO timestamps; naive values are treated as UTC. */
+export function parseServerDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null
+  const s = String(iso).trim()
+  if (!s) return null
+  const hasOffset = /(?:Z|[+-]\d{2}:\d{2})$/i.test(s)
+  const d = new Date(hasOffset ? s : `${s}Z`)
+  return isNaN(d.getTime()) ? null : d
+}
+
 export function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
+  const d = parseServerDate(iso)
+  if (!d) return '—'
   const now = new Date()
   const diff = (now.getTime() - d.getTime()) / 1000
   if (diff < 60) return '刚刚'
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
   if (diff < 7 * 86400) return `${Math.floor(diff / 86400)} 天前`
-  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+  return d.toLocaleDateString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: getDisplayTimezone(),
+  })
 }
 
 export function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
+  const d = parseServerDate(iso)
+  if (!d) return '—'
   return d.toLocaleString('zh-CN', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: getDisplayTimezone(),
   })
 }
 

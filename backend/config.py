@@ -44,6 +44,10 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def get_display_timezone() -> str:
+    return os.getenv("DISPLAY_TIMEZONE", "Asia/Shanghai").strip() or "Asia/Shanghai"
+
+
 def is_allowed_env_key(key: str) -> bool:
     if key in BLOCKLIST_KEYS:
         return False

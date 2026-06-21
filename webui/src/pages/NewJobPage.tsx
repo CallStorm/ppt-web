@@ -55,7 +55,7 @@ export function NewJobPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">新建任务</h1>
+        <h1 className="text-xl font-semibold">创建</h1>
         <Link to="/" className="text-sm text-slate-500 hover:text-gemini-600">
           取消
         </Link>

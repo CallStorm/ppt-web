@@ -40,20 +40,23 @@ def classify_stage(command: str, file_path: str, *, write: bool | None = None) -
 
 def resolve_project_dir(project_name: str, root: Path) -> Path | None:
     """project_manager.py init 会把目录命名为 <name>_<format>_<date>，
-    所以不能直接用 <name>，要按前缀 glob 在 root/projects/ 下找真实目录（取最新）。
+    所以不能直接用 <name>，要按前缀在 project_root 下找真实目录（取最新）。
 
-    Phase 2: root 是 per-user project_root（`data/users/<uid>/projects/<job_id>/`），
-    ppt-master init 会把 `<name>_<format>_<date>/` 建在 `<root>/projects/` 下。
+    Phase 2: root 是 per-user project_root（`data/users/<uid>/projects/<job_id>/`）。
+    Agent 实际会把 `<name>_<format>_<date>/` 直接建在 root 下；部分环境也可能
+    建在 `<root>/projects/` 下，两处都查。
     """
-    base = root / "projects"
-    if not base.exists():
+    hits: list[Path] = []
+    for base in (root / "projects", root):
+        if not base.is_dir():
+            continue
+        hits.extend(
+            p for p in base.iterdir()
+            if p.is_dir() and p.name.startswith(project_name)
+        )
+    if not hits:
         return None
-    hits = sorted(
-        [p for p in base.iterdir() if p.is_dir() and p.name.startswith(project_name)],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    return hits[0] if hits else None
+    return max(hits, key=lambda p: p.stat().st_mtime)
 
 
 def find_pptx(root: Path) -> Path | None:

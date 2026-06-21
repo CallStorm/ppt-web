@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Job, JobListResponse } from '../api/types'
 
@@ -40,4 +40,17 @@ export function useUpsertJob() {
       )
     })
   }
+}
+
+export function useDeleteJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api<{ id: string; deleted: boolean }>('DELETE', `/api/jobs/${id}`),
+    onSuccess: (_data, id) => {
+      qc.setQueryData(JOBS_KEY, (old: Job[] | undefined) =>
+        old ? old.filter((j) => j.id !== id) : [],
+      )
+      qc.removeQueries({ queryKey: jobKey(id) })
+    },
+  })
 }
