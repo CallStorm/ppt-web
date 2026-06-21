@@ -9,6 +9,12 @@
 - 完整文档：[Docs/README.md](./Docs/README.md)
 - phase0 验证报告：[phase0/REPORT.md](./phase0/REPORT.md)
 
+## 系统架构
+
+![ppt-web 整体架构](./images/architecture.png)
+
+> 可编辑源文件：[Docs/architecture/ppt-web-architecture.drawio](./Docs/architecture/ppt-web-architecture.drawio)（draw.io / diagrams.net）
+
 ## 界面预览
 
 ### 作品列表
@@ -248,7 +254,8 @@ bash docker/ppt-runner/build.sh
 ppt-web/
 ├── DESIGN.md              # 设计摘要与实现状态索引
 ├── Docs/                  # 完整文档（product/architecture/design/development/deployment/reference）
-├── images/                # README 界面截图
+│   └── architecture/      # 架构图源文件（ppt-web-architecture.drawio）
+├── images/                # README 截图与架构图（architecture.png）
 ├── README.md              # 本文件
 ├── .env.example           # 环境变量示例（cp 成 .env 用）
 ├── .gitignore

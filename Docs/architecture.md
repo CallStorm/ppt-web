@@ -7,6 +7,12 @@
 
 ### 架构图
 
+![ppt-web 整体架构](../images/architecture.png)
+
+> 可编辑源文件：[architecture/ppt-web-architecture.drawio](architecture/ppt-web-architecture.drawio)
+
+简版（mermaid）：
+
 ```mermaid
 flowchart TB
   subgraph browser [Browser]

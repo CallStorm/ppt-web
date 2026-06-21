@@ -1,0 +1,186 @@
+<mxfile host="app.diagrams.net" agent="ppt-web">
+  <diagram id="ppt-web-arch" name="ppt-web 整体架构">
+    <mxGraphModel dx="2054" dy="1121" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" value="ppt-web 整体架构" vertex="1">
+          <mxGeometry height="40" width="560" x="520" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontColor=#666666;" value="Web 封装 ppt-master · 每 Job 一个 Docker 容器 · Claude CLI 驱动 Agent 流水线" vertex="1">
+          <mxGeometry height="25" width="800" x="400" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="browser_group" parent="1" style="swimlane;horizontal=0;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" value="浏览器层" vertex="1">
+          <mxGeometry height="280" width="200" x="40" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="user" parent="browser_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="👤 用户" vertex="1">
+          <mxGeometry height="40" width="120" x="50" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="webui" parent="browser_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;align=left;spacingLeft=8;" value="WebUI&#xa;(React + Vite SPA)&#xa;&#xa;· 创建任务 / 上传素材&#xa;· 任务详情 + 时间线&#xa;· SSE 订阅进度&#xa;· 下载 .pptx" vertex="1">
+          <mxGeometry height="150" width="160" x="30" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="host_group" parent="1" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" value="宿主机 · ppt-web 应用层 (Python FastAPI + uvicorn :8765)" vertex="1">
+          <mxGeometry height="480" width="520" x="280" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="api_auth" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" value="API Routes&#xa;/api/auth · /api/jobs · /api/admin" vertex="1">
+          <mxGeometry height="50" width="220" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="api_sse" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;align=left;spacingLeft=6;" value="SSE 事件流&#xa;GET /api/jobs/{id}/events&#xa;(stage · tool · agent_text · pptx)" vertex="1">
+          <mxGeometry height="60" width="240" x="260" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="dispatcher" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=8;" value="Runtime Dispatcher&#xa;(asyncio 进程内)&#xa;&#xa;· 从 DB 取 queued job&#xa;· MAX_CONCURRENT_JOBS 限流&#xa;· asyncio.to_thread(run_sync)" vertex="1">
+          <mxGeometry height="110" width="220" x="20" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="runner_layer" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=8;" value="Runner 执行层&#xa;backend/runner/&#xa;&#xa;· sync.py — run_sync / resume_sync&#xa;· claude.py — stream_claude()&#xa;· docker.py — 构建 docker run 命令&#xa;· stages.py — 阶段分类 + find_pptx()" vertex="1">
+          <mxGeometry height="130" width="240" x="260" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="events" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;align=left;spacingLeft=8;" value="Events 模块&#xa;· 解析 stream-json → 结构化事件&#xa;· 写 DB (events 表)&#xa;· 内存 pub/sub → SSE fanout" vertex="1">
+          <mxGeometry height="90" width="220" x="20" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="watchdog" parent="host_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;align=left;spacingLeft=8;" value="Watchdog&#xa;· 超时 docker stop&#xa;· 用户 cancel" vertex="1">
+          <mxGeometry height="70" width="240" x="260" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="docker_cli" parent="host_group" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=8;" value="宿主机 docker CLI&#xa;subprocess.Popen([&#xa;  &quot;docker&quot;, &quot;run&quot;, &quot;--rm&quot;, &quot;-i&quot;, ...&#xa;])&#xa;捕获 stdout (stream-json)" vertex="1">
+          <mxGeometry height="75" width="360" x="80" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="storage_group" parent="1" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" value="持久化存储" vertex="1">
+          <mxGeometry height="280" width="280" x="840" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="mysql" parent="storage_group" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=8;" value="MySQL 8&#xa;(ppt-mysql 容器)&#xa;&#xa;· users / jobs / events&#xa;· app_config (Admin 配置)" vertex="1">
+          <mxGeometry height="100" width="220" x="30" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="datadir" parent="storage_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;align=left;spacingLeft=8;fontFamily=Courier New;" value="本地文件系统&#xa;data/users/&lt;uid&gt;/&#xa;&#xa;· uploads/&lt;job_id&gt;/  ← 用户上传&#xa;· projects/&lt;job_id&gt;/ ← Agent 产物&#xa;  └─ &lt;name&gt;_ppt169_&lt;date&gt;/&#xa;     ├─ svg_output/*.svg&#xa;     └─ exports/*.pptx" vertex="1">
+          <mxGeometry height="110" width="240" x="20" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="docker_infra" parent="1" style="swimlane;startSize=30;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;" value="Docker 基础设施" vertex="1">
+          <mxGeometry height="160" width="280" x="840" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="image" parent="docker_infra" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;align=left;spacingLeft=8;" value="ppt-runner:latest 镜像&#xa;(build.sh 构建 ~1.5GB)&#xa;&#xa;python 3.11 + Node.js&#xa;claude CLI + ppt-master 源码&#xa;pip 依赖 + CJK 字体" vertex="1">
+          <mxGeometry height="100" width="240" x="20" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="container_group" parent="1" style="swimlane;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=13;" value="每 Job 一个临时容器 (ppt-job-&lt;job_id&gt;) · --rm 跑完自动销毁" vertex="1">
+          <mxGeometry height="380" width="840" x="280" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="network" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;dashed=1;" value="网络: ppt-isolated&#xa;(bridge, 隔离端口冲突)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="mount" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" value="Volume Mount&#xa;host: data/users/&lt;uid&gt;/&#xa;  ↕&#xa;container: /work" vertex="1">
+          <mxGeometry height="80" width="180" x="20" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="env_vars" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;align=left;spacingLeft=8;" value="环境变量注入&#xa;PROMPT · JOB_ID&#xa;ANTHROPIC_AUTH_TOKEN&#xa;ANTHROPIC_MODEL / BASE_URL&#xa;(Admin 后台配置)" vertex="1">
+          <mxGeometry height="100" width="180" x="20" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="limits" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;" value="资源限制&#xa;memory=4g · cpus=2&#xa;timeout=1800s" vertex="1">
+          <mxGeometry height="45" width="180" x="20" y="325" as="geometry" />
+        </mxCell>
+        <mxCell id="entrypoint" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontFamily=Courier New;" value="entrypoint.sh&#xa;exec claude --print&#xa;  --output-format stream-json&#xa;  -p &quot;${PROMPT}&quot;" vertex="1">
+          <mxGeometry height="80" width="220" x="240" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="claude_cli" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;align=left;spacingLeft=8;" value="Claude CLI&#xa;(Claude Code)&#xa;&#xa;· headless 非交互模式&#xa;· 调用 Anthropic API&#xa;· stdout → stream-json 事件流&#xa;· 支持 --resume session" vertex="1">
+          <mxGeometry height="120" width="220" x="240" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="pptmaster" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=8;fontSize=11;" value="ppt-master (容器内 /opt/ppt-master)&#xa;&#xa;skills/ppt-master/SKILL.md 驱动流水线:&#xa;  1. source_to_md — 解析素材&#xa;  2. project_manager init — 建项目&#xa;  3. Strategist — design_spec.md&#xa;  4. (可选) 八点确认&#xa;  5. image_gen / image_search — 生图&#xa;  6. Executor — svg_output/*.svg&#xa;  7. svg_quality_checker — 质检&#xa;  8. svg_to_pptx — exports/*.pptx" vertex="1">
+          <mxGeometry height="200" width="320" x="500" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="work_dir" parent="container_group" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;align=left;spacingLeft=8;" value="容器内工作目录&#xa;/work/projects/&lt;job_id&gt;/&#xa;(挂载卷, 写回宿主机)" vertex="1">
+          <mxGeometry height="60" width="320" x="500" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="stdout" parent="container_group" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" value="stdout: stream-json&#xa;(逐行 JSON 事件)&#xa;→ 宿主机 pipe 解析" vertex="1">
+          <mxGeometry height="60" width="220" x="240" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="anthropic" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontStyle=1;" value="Anthropic API&#xa;(或兼容第三方 API)&#xa;&#xa;ANTHROPIC_BASE_URL&#xa;ANTHROPIC_AUTH_TOKEN" vertex="1">
+          <mxGeometry height="90" width="200" x="1160" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" value="" vertex="1">
+          <mxGeometry height="200" width="200" x="40" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontStyle=1;fontSize=12;" value="图例 / 数据流" vertex="1">
+          <mxGeometry height="20" width="120" x="50" y="425" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="① HTTP / SSE 请求" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="② docker run 启动容器" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="475" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="③ Volume 共享产物文件" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="④ stream-json 进度回传" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="525" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="⑤ Claude 调用 LLM API" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="550" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;" value="⑥ 读写 DB / 文件" vertex="1">
+          <mxGeometry height="20" width="180" x="50" y="575" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" edge="1" parent="1" source="user" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#6c8ebf;" target="webui">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" edge="1" parent="1" source="webui" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#6c8ebf;fontStyle=1;" target="api_auth" value="① REST + SSE">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" edge="1" parent="1" source="webui" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=1;strokeColor=#6c8ebf;dashed=1;" target="api_sse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" edge="1" parent="1" source="api_auth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#82b366;" target="dispatcher">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" edge="1" parent="1" source="dispatcher" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#82b366;" target="runner_layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" edge="1" parent="1" source="runner_layer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d79b00;fontStyle=1;" target="docker_cli" value="②">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" edge="1" parent="1" source="docker_cli" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d79b00;fontStyle=1;" target="entrypoint" value="docker run -i&#xa;--rm -v ...:/work">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a8" edge="1" parent="1" source="entrypoint" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#9673a6;" target="claude_cli">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a9" edge="1" parent="1" source="claude_cli" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#82b366;" target="pptmaster" value="读 SKILL.md&#xa;执行 Bash/Write 工具">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a10" edge="1" parent="1" source="pptmaster" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d6b656;fontStyle=1;" target="work_dir" value="写 svg / pptx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a11" edge="1" parent="1" source="work_dir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d6b656;fontStyle=1;" target="datadir" value="③ Volume Mount&#xa;实时同步">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="960" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a12" edge="1" parent="1" source="claude_cli" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d79b00;" target="stdout">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a13" edge="1" parent="1" source="stdout" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#d79b00;fontStyle=1;" target="events" value="④ stream-json">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="580" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a14" edge="1" parent="1" source="events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=1;strokeColor=#6c8ebf;dashed=1;" target="api_sse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a15" edge="1" parent="1" source="claude_cli" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=2;strokeColor=#b85450;dashed=1;fontStyle=1;" target="anthropic" value="⑤ HTTPS">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a16" edge="1" parent="1" source="dispatcher" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=1;strokeColor=#666666;dashed=1;" target="mysql" value="⑥">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a17" edge="1" parent="1" source="runner_layer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=1;strokeColor=#666666;dashed=1;" target="datadir" value="⑥ find_pptx()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a18" edge="1" parent="1" source="image" style="edgeStyle=orthogonalEdgeStyle;rounded=0;strokeWidth=1;strokeColor=#d79b00;dashed=1;" target="container_group" value="from image">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="seq_note" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingTop=0;fillColor=#ffffcc;strokeColor=#d6b656;fontSize=11;" value="典型请求生命周期:&#xa;POST /api/jobs → Job(queued) → Dispatcher 拉起容器 → Claude 跑 ppt-master 流水线&#xa;→ stream-json 实时推 SSE → 产物写 /work → 宿主机 find_pptx → Job(done) → 下载 pptx" vertex="1">
+          <mxGeometry height="50" width="1080" x="40" y="1040" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
