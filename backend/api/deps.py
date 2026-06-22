@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from backend.api.schemas.job_options import parse_job_options
 from backend.models import Job, User
-from backend.paths import is_under, project_root_for
+from backend.paths import is_under, project_root_for, uploads_dir_for
 from backend.runner.preview import find_cover_preview
 from backend.runner.stages import resolve_project_dir
 from backend.runtime import queue_position
@@ -34,6 +34,28 @@ def job_has_preview(j: Job) -> bool:
     return find_cover_preview(resolve_job_project_dir(j)) is not None
 
 
+def _list_uploads(j: Job) -> list[dict]:
+    """列用户在创建时上传到 data/users/<uid>/uploads/<job_id>/ 的素材。"""
+    if not j.user_id:
+        return []
+    udir = uploads_dir_for(j.user_id, j.id)
+    if not udir.is_dir():
+        return []
+    out: list[dict] = []
+    try:
+        for p in sorted(udir.iterdir()):
+            if not p.is_file():
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                size = None
+            out.append({"name": p.name, "size": size})
+    except OSError:
+        return []
+    return out
+
+
 def job_to_dict(j: Job) -> dict:
     opts = parse_job_options(j.options_json)
     return {
@@ -50,6 +72,7 @@ def job_to_dict(j: Job) -> dict:
         "last_event_seq": j.last_event_seq,
         "require_confirm": j.require_confirm,
         "options": opts.model_dump() if opts else None,
+        "uploads": _list_uploads(j),
         "error_message": j.error_message,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "updated_at": j.updated_at.isoformat() if j.updated_at else None,

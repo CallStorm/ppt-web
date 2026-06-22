@@ -18,6 +18,11 @@ export interface User {
   role: 'user' | 'admin'
 }
 
+export interface JobUpload {
+  name: string
+  size: number | null
+}
+
 export interface Job {
   id: string
   user_id: string
@@ -32,6 +37,7 @@ export interface Job {
   last_event_seq: number | null
   require_confirm: boolean
   options: JobOptions | null
+  uploads: JobUpload[]
   error_message: string | null
   created_at: string | null
   updated_at: string | null

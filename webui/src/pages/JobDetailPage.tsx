@@ -6,7 +6,17 @@ import { useJob } from '../hooks/useJobs'
 import { useJobEvents } from '../hooks/useJobEvents'
 import { StatusPill } from '../components/jobs/StatusPill'
 import { fmtCost, fmtDateTime, truncate } from '../lib/format'
-import { formatJobOptionsSummary } from '../lib/jobOptions'
+import {
+  VISUAL_STYLE_OPTIONS,
+  COLOR_MODE_OPTIONS,
+  IMAGE_STRATEGY_OPTIONS,
+  ICON_STRATEGY_OPTIONS,
+  FORMULA_POLICY_OPTIONS,
+  INDUSTRY_OPTIONS,
+  CANVAS_OPTIONS,
+  MODE_OPTIONS,
+  type JobOptions,
+} from '../lib/jobOptions'
 import { confirmDialog } from '../stores/modalStore'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 
@@ -276,14 +286,6 @@ export function JobDetailPage() {
 
       {tab === 'overview' && (
         <div className="space-y-4 text-sm">
-          {job.options && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
-              <p className="text-xs text-slate-500">生成选项</p>
-              <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                {formatJobOptionsSummary(job.options)}
-              </p>
-            </div>
-          )}
           <dl className="grid gap-2 sm:grid-cols-2">
             <div>
               <dt className="text-slate-500">状态</dt>
@@ -302,6 +304,10 @@ export function JobDetailPage() {
               <dd>{fmtDateTime(job.updated_at)}</dd>
             </div>
           </dl>
+
+          {/* ── 创建参数面板 ─────────────────────────────────────── */}
+          <JobOptionsPanel job={job} />
+
           {job.error_message && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300">
               {job.error_message}
@@ -370,6 +376,188 @@ export function JobDetailPage() {
           ) : (
             <p className="text-slate-400">产物尚未就绪</p>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 创建参数面板（独立子组件，渲染在 overview tab 概览之后） ──────
+
+function fmtBytes(n: number | null | undefined): string {
+  if (n == null) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function optionLabelFrom(list: { value: string; label: string }[], value: string | null | undefined): string {
+  if (value == null) return '—'
+  return list.find((x) => x.value === value)?.label ?? value
+}
+
+function FieldRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr] gap-2 text-xs">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="break-all text-slate-700 dark:text-slate-300">{value || '—'}</dd>
+    </div>
+  )
+}
+
+function FieldList({ items }: { items: { label: string; value: React.ReactNode }[] }) {
+  return (
+    <dl className="space-y-1.5">
+      {items.map((it) => (
+        <FieldRow key={it.label} label={it.label} value={it.value} />
+      ))}
+    </dl>
+  )
+}
+
+function FieldGroup({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section>
+      <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        {title}
+      </h4>
+      {children}
+    </section>
+  )
+}
+
+function visualStyleLabel(v: string | null | undefined): string {
+  if (v == null) return '—'
+  return VISUAL_STYLE_OPTIONS.find((x) => x.value === v)?.label ?? v
+}
+
+function JobOptionsPanel({ job }: { job: { project_name: string | null; prompt: string; options: JobOptions | null; uploads: { name: string; size: number | null }[] } }) {
+  const o = job.options
+  return (
+    <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+      <h3 className="mb-3 text-sm font-medium">创建参数</h3>
+
+      {/* 项目 */}
+      <div className="mb-4 space-y-3">
+        <FieldGroup title="项目">
+          <FieldList
+            items={[
+              { label: '项目名称', value: job.project_name || '（未命名）' },
+              { label: '核心主题', value: <span className="whitespace-pre-wrap">{job.prompt}</span> },
+            ]}
+          />
+        </FieldGroup>
+
+        {job.uploads && job.uploads.length > 0 && (
+          <FieldGroup title="上传素材">
+            <ul className="space-y-1 text-xs">
+              {job.uploads.map((u) => (
+                <li key={u.name} className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                  <span className="break-all">{u.name}</span>
+                  <span className="ml-auto text-slate-400">{fmtBytes(u.size)}</span>
+                </li>
+              ))}
+            </ul>
+          </FieldGroup>
+        )}
+      </div>
+
+      {o && (
+        <div className="space-y-4 border-t border-slate-200 pt-4 dark:border-slate-700">
+          {/* 内容定位 */}
+          <FieldGroup title="内容定位">
+            <FieldList
+              items={[
+                { label: '语言', value: optionLabelFrom([{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }, { value: 'bilingual', label: '中英双语' }], o.language) },
+                { label: '场景', value: optionLabelFrom([{ value: 'general', label: '通用' }, { value: 'proposal', label: '方案汇报' }, { value: 'product', label: '产品介绍' }, { value: 'training', label: '培训教程' }, { value: 'popular_science', label: '科普宣传' }, { value: 'speech', label: '演讲答辩' }, { value: 'project_report', label: '项目汇报' }], o.scenario) },
+                { label: '受众', value: optionLabelFrom([{ value: 'general', label: '通用受众' }, { value: 'executive', label: '管理层' }, { value: 'team', label: '团队内部' }, { value: 'client', label: '客户/合作方' }, { value: 'expert', label: '评审专家' }, { value: 'student', label: '学员/学生' }], o.audience) },
+                { label: '语调', value: optionLabelFrom([{ value: 'professional', label: '专业严谨' }, { value: 'friendly', label: '轻松友好' }, { value: 'technical', label: '技术深入' }, { value: 'academic', label: '学术规范' }, { value: 'concise', label: '简洁凝练' }], o.tone) },
+              ]}
+            />
+          </FieldGroup>
+
+          {/* 画布与结构 */}
+          <FieldGroup title="画布与结构">
+            <FieldList
+              items={[
+                { label: '画布', value: optionLabelFrom(CANVAS_OPTIONS, o.canvas) },
+                { label: '叙事模式', value: optionLabelFrom(MODE_OPTIONS, o.mode) },
+                { label: '视觉风格', value: visualStyleLabel(o.visual_style) },
+                { label: '页数', value: `${o.page_count} 页` },
+              ]}
+            />
+          </FieldGroup>
+
+          {/* 视觉设计 */}
+          <FieldGroup title="视觉设计">
+            <FieldList
+              items={[
+                {
+                  label: '配色',
+                  value:
+                    o.color_mode === 'brand' && o.brand_hex
+                      ? `品牌色（${o.brand_hex}）`
+                      : o.color_mode === 'industry' && o.industry
+                        ? `行业预设（${optionLabelFrom(INDUSTRY_OPTIONS, o.industry)}）`
+                        : optionLabelFrom(COLOR_MODE_OPTIONS, o.color_mode),
+                },
+                { label: '图片策略', value: optionLabelFrom(IMAGE_STRATEGY_OPTIONS, o.image_strategy) },
+                { label: '图标策略', value: optionLabelFrom(ICON_STRATEGY_OPTIONS, o.icon_strategy) },
+                { label: '公式渲染', value: optionLabelFrom(FORMULA_POLICY_OPTIONS, o.formula_policy) },
+              ]}
+            />
+          </FieldGroup>
+
+          {/* 内容结构（可选） */}
+          {(o.outline?.length || o.key_points?.length || o.core_topic) && (
+            <FieldGroup title="内容结构">
+              <div className="space-y-3">
+                {o.core_topic && o.core_topic !== job.prompt && (
+                  <FieldRow label="扩展描述" value={<span className="whitespace-pre-wrap">{o.core_topic}</span>} />
+                )}
+                {o.outline && o.outline.length > 0 && (
+                  <FieldRow
+                    label="章节大纲"
+                    value={
+                      <ol className="list-decimal space-y-0.5 pl-4">
+                        {o.outline.map((h, i) => (
+                          <li key={i}>{h}</li>
+                        ))}
+                      </ol>
+                    }
+                  />
+                )}
+                {o.key_points && o.key_points.length > 0 && (
+                  <FieldRow
+                    label="重点强调"
+                    value={
+                      <ul className="list-disc space-y-0.5 pl-4">
+                        {o.key_points.map((p, i) => (
+                          <li key={i}>{p}</li>
+                        ))}
+                      </ul>
+                    }
+                  />
+                )}
+              </div>
+            </FieldGroup>
+          )}
+
+          {/* 输出约束 */}
+          <FieldGroup title="输出约束">
+            <FieldList
+              items={[
+                { label: '演讲者备注', value: o.include_speaker_notes ? '生成' : '不生成' },
+                { label: '分阶段模式', value: o.split_mode ? '是（长 deck）' : '否' },
+              ]}
+            />
+          </FieldGroup>
         </div>
       )}
     </div>
