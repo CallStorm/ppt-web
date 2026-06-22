@@ -193,6 +193,27 @@ export function AdminPage() {
   }
 
   const saveSettings = async () => {
+    const dockerCfg = (settingsForm.docker || {}) as Record<string, unknown>
+    const wdCfg = (settingsForm.watchdog || {}) as Record<string, unknown>
+    const wdInterval = Number(wdCfg.interval_s)
+    const wdStale = Number(wdCfg.stale_secs)
+    const dockerTimeout = Number(dockerCfg.timeout_s)
+    if (Number.isFinite(wdInterval) && Number.isFinite(wdStale) && wdInterval >= wdStale) {
+      notifyError('watchdog.interval_s 必须小于 stale_secs')
+      return
+    }
+    if (Number.isFinite(dockerTimeout) && (dockerTimeout < 60 || dockerTimeout > 86400)) {
+      notifyError('docker.timeout_s 必须在 60..86400 之间')
+      return
+    }
+    if (Number.isFinite(wdStale) && (wdStale < 60 || wdStale > 86400)) {
+      notifyError('watchdog.stale_secs 必须在 60..86400 之间')
+      return
+    }
+    if (Number.isFinite(wdInterval) && (wdInterval < 5 || wdInterval > 3600)) {
+      notifyError('watchdog.interval_s 必须在 5..3600 之间')
+      return
+    }
     setSavingSettings(true)
     try {
       const patch: Record<string, unknown> = {
@@ -419,6 +440,23 @@ export function AdminPage() {
 
       {tab === 'settings' && settings && (
         <div className="max-w-xl space-y-4">
+          {/* ── 帮助卡片：区分两种超时 ─────────────────────────── */}
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+            <div className="mb-1.5 font-medium">⚠ 这两个超时机制不一样，搞混会出问题</div>
+            <p className="mb-1.5">
+              <span className="font-semibold">单任务总超时 (docker.timeout_s)</span>
+              ：硬性墙钟——从容器启动到结束的绝对时长上限。
+              超过即停容器、标 failed、<span className="underline">不退积分</span>（视作取消）。
+              修改后仅对<span className="font-semibold">新启动</span>任务生效。
+            </p>
+            <p>
+              <span className="font-semibold">无心跳超时 (watchdog.stale_secs)</span>
+              ：心跳式——agent 持续产生事件就不会触发。
+              真正卡死（N 秒无任何事件入 DB）才停容器、<span className="underline">自动退 1 积分</span>。
+              修改后下一个扫描周期生效。
+            </p>
+          </div>
+
           <label className="block">
             <span className="text-xs text-slate-500">最大并发任务数</span>
             <input
@@ -435,6 +473,70 @@ export function AdminPage() {
               className="mt-1 w-full rounded border px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
             />
           </label>
+
+          {/* ── 运行超时分组 ─────────────────────────────────── */}
+          <div className="space-y-3 rounded-md border border-slate-200 p-4 dark:border-slate-700">
+            <h3 className="text-sm font-medium">运行超时</h3>
+            <TimeoutField
+              label="单任务总超时"
+              fieldPath="docker.timeout_s"
+              value={(settingsForm.docker as Record<string, unknown> | undefined)?.timeout_s}
+              onChange={(v) =>
+                setSettingsForm((f) => ({
+                  ...f,
+                  docker: { ...(f.docker || {}), timeout_s: v },
+                }))
+              }
+              min={60}
+              max={86400}
+              unit="秒"
+              rangeHint="60–86400"
+              defaults={((settings.docker as Record<string, unknown> | undefined)?.defaults as Record<string, unknown> | undefined) || null}
+              overrides={((settings.docker as Record<string, unknown> | undefined)?.overrides as Record<string, unknown> | undefined) || null}
+              keyName="timeout_s"
+            />
+          </div>
+
+          {/* ── Watchdog 卡死检测分组 ────────────────────────── */}
+          <div className="space-y-3 rounded-md border border-slate-200 p-4 dark:border-slate-700">
+            <h3 className="text-sm font-medium">Watchdog 卡死检测</h3>
+            <TimeoutField
+              label="无心跳超时"
+              fieldPath="watchdog.stale_secs"
+              value={(settingsForm.watchdog as Record<string, unknown> | undefined)?.stale_secs}
+              onChange={(v) =>
+                setSettingsForm((f) => ({
+                  ...f,
+                  watchdog: { ...(f.watchdog || {}), stale_secs: v },
+                }))
+              }
+              min={60}
+              max={86400}
+              unit="秒"
+              rangeHint="60–86400"
+              defaults={((settings.watchdog as Record<string, unknown> | undefined)?.defaults as Record<string, unknown> | undefined) || null}
+              overrides={((settings.watchdog as Record<string, unknown> | undefined)?.overrides as Record<string, unknown> | undefined) || null}
+              keyName="stale_secs"
+            />
+            <TimeoutField
+              label="扫描间隔"
+              fieldPath="watchdog.interval_s"
+              value={(settingsForm.watchdog as Record<string, unknown> | undefined)?.interval_s}
+              onChange={(v) =>
+                setSettingsForm((f) => ({
+                  ...f,
+                  watchdog: { ...(f.watchdog || {}), interval_s: v },
+                }))
+              }
+              min={5}
+              max={3600}
+              unit="秒"
+              rangeHint="5–3600，建议 30–120（过小会增加 DB 负载）"
+              defaults={((settings.watchdog as Record<string, unknown> | undefined)?.defaults as Record<string, unknown> | undefined) || null}
+              overrides={((settings.watchdog as Record<string, unknown> | undefined)?.overrides as Record<string, unknown> | undefined) || null}
+              keyName="interval_s"
+            />
+          </div>
           {PRESET_ENV_KEYS.map((k) => (
             <label key={k} className="block">
               <span className="text-xs text-slate-500">{k}</span>
@@ -487,5 +589,77 @@ function Stat({ label, value }: { label: string; value: number }) {
       <dt className="text-xs text-slate-500">{label}</dt>
       <dd className="mt-1 text-2xl font-semibold">{value}</dd>
     </div>
+  )
+}
+
+type TimeoutFieldProps = {
+  label: string
+  fieldPath: string
+  value: unknown
+  onChange: (v: number | undefined) => void
+  min: number
+  max: number
+  unit: string
+  rangeHint: string
+  defaults: Record<string, unknown> | null
+  overrides: Record<string, unknown> | null
+  keyName: string
+}
+
+function TimeoutField({
+  label,
+  fieldPath,
+  value,
+  onChange,
+  min,
+  max,
+  unit,
+  rangeHint,
+  defaults,
+  overrides,
+  keyName,
+}: TimeoutFieldProps) {
+  const isCustomized = overrides != null && overrides[keyName] != null
+  const defaultVal = defaults?.[keyName]
+  const sourceHint = isCustomized
+    ? `已自定义 (${String(overrides![keyName])})`
+    : defaultVal != null
+      ? `默认值 (${String(defaultVal)})`
+      : '默认值'
+
+  const display =
+    value === undefined || value === null || Number.isNaN(value as number)
+      ? ''
+      : String(value)
+
+  return (
+    <label className="block">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-slate-500">
+          {label} <span className="text-slate-400">({fieldPath})</span>
+        </span>
+        <span className="text-[10px] text-slate-400">{sourceHint}</span>
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={display}
+          onChange={(e) => {
+            const raw = e.target.value
+            if (raw === '') {
+              onChange(undefined)
+              return
+            }
+            const n = parseInt(raw, 10)
+            onChange(Number.isFinite(n) ? n : undefined)
+          }}
+          className="w-32 rounded border px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+        />
+        <span className="text-xs text-slate-500">{unit}</span>
+      </div>
+      <div className="mt-1 text-[10px] text-slate-400">{rangeHint}</div>
+    </label>
   )
 }

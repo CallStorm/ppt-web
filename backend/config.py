@@ -84,7 +84,7 @@ class DockerConfig:
     network: str = "ppt-isolated"
     memory: str = "4g"
     cpus: str = "2"
-    timeout_s: int = 1800
+    timeout_s: int = 3600  # 单任务硬性墙钟上限；超过即停容器、标 failed、不退积分
 
 
 @dataclass
@@ -111,7 +111,7 @@ def _defaults_from_env() -> RuntimeConfig:
             network=os.getenv("DOCKER_RUNNER_NETWORK", "ppt-isolated"),
             memory=os.getenv("DOCKER_RUNNER_MEMORY", "4g"),
             cpus=os.getenv("DOCKER_RUNNER_CPUS", "2"),
-            timeout_s=_env_int("DOCKER_RUNNER_TIMEOUT_S", 1800),
+            timeout_s=_env_int("DOCKER_RUNNER_TIMEOUT_S", 3600),
         ),
         watchdog=WatchdogConfig(
             stale_secs=_env_int("WATCHDOG_STALE_SECS", 600),
