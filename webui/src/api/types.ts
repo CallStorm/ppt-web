@@ -6,20 +6,10 @@ export type JobStatus =
   | 'failed'
   | 'cancelled'
 
-export interface JobOptions {
-  language: 'zh' | 'en' | 'bilingual'
-  scenario:
-    | 'general'
-    | 'proposal'
-    | 'product'
-    | 'training'
-    | 'popular_science'
-    | 'speech'
-    | 'project_report'
-  audience: 'general' | 'executive' | 'team' | 'client' | 'expert' | 'student'
-  tone: 'professional' | 'friendly' | 'technical' | 'academic' | 'concise'
-  page_count: number
-}
+// JobOptions 的真实定义在 lib/jobOptions.ts；这里 re-export 保持单一来源。
+// 老代码 `import type { JobOptions } from '../api/types'` 仍然可用。
+import type { JobOptions } from '../lib/jobOptions'
+export type { JobOptions }
 
 export interface User {
   id: string

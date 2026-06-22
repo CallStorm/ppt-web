@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { notifyError } from '../../stores/toastStore'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 export type ModelInfo = {
   configured: boolean
