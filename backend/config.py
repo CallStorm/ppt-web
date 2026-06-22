@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -232,6 +233,109 @@ def _validate_docker_cpus(s: str) -> None:
         raise ValueError(f"invalid docker cpus: {s!r}")
 
 
+# ── app.models 校验 ─────────────────────────────────────────────
+MODEL_PROVIDERS = frozenset({"minimax", "deepseek"})
+MODEL_PROTOCOLS = frozenset({"anthropic"})  # 后续可加 openai 等
+MAX_MODEL_NAME_LEN = 64
+MAX_MODELS = 32
+
+
+def _validate_app_models(raw: Any) -> list[dict]:
+    """校验并规范化 app.models 列表。返回新的 list（不复用引用）。
+
+    规则：
+      - list 元素必须为 dict
+      - name 非空、≤64 字符、列表内唯一
+      - provider ∈ {minimax, deepseek}
+      - protocol ∈ {anthropic}
+      - base_url http(s) 且有 host
+      - model 非空
+      - id 缺失则生成 UUID4 hex；存在则保留（保证 secrets 关联稳定）
+      - is_default 至多一个为 true
+      - enabled 强制 bool
+    """
+    if not isinstance(raw, list):
+        raise ValueError("app.models must be a list")
+    if len(raw) > MAX_MODELS:
+        raise ValueError(f"app.models too many entries (>{MAX_MODELS})")
+
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    out: list[dict] = []
+    default_count = 0
+    first_default_idx: int | None = None
+
+    for i, m in enumerate(raw):
+        if not isinstance(m, dict):
+            raise ValueError(f"app.models[{i}] must be an object")
+        # id
+        mid = m.get("id")
+        if not mid or not isinstance(mid, str) or len(mid) > 64:
+            mid = uuid.uuid4().hex
+        elif mid in seen_ids:
+            raise ValueError(f"app.models[{i}].id duplicate: {mid!r}")
+        seen_ids.add(mid)
+        # name
+        name = str(m.get("name") or "").strip()
+        if not name:
+            raise ValueError(f"app.models[{i}].name required")
+        if len(name) > MAX_MODEL_NAME_LEN:
+            raise ValueError(f"app.models[{i}].name too long (>{MAX_MODEL_NAME_LEN})")
+        if name in seen_names:
+            raise ValueError(f"app.models[{i}].name duplicate: {name!r}")
+        seen_names.add(name)
+        # provider
+        provider = str(m.get("provider") or "").strip().lower()
+        if provider not in MODEL_PROVIDERS:
+            raise ValueError(
+                f"app.models[{i}].provider must be one of {sorted(MODEL_PROVIDERS)}, got {provider!r}"
+            )
+        # protocol
+        protocol = str(m.get("protocol") or "anthropic").strip().lower()
+        if protocol not in MODEL_PROTOCOLS:
+            raise ValueError(
+                f"app.models[{i}].protocol must be one of {sorted(MODEL_PROTOCOLS)}, got {protocol!r}"
+            )
+        # base_url
+        base_url = str(m.get("base_url") or "").strip()
+        if not base_url:
+            raise ValueError(f"app.models[{i}].base_url required")
+        p = urlparse(base_url)
+        if p.scheme not in ("http", "https") or not p.netloc:
+            raise ValueError(f"app.models[{i}].base_url must be http(s)://...")
+        # model
+        model_id = str(m.get("model") or "").strip()
+        if not model_id:
+            raise ValueError(f"app.models[{i}].model required")
+        if len(model_id) > 256:
+            raise ValueError(f"app.models[{i}].model too long")
+        # enabled
+        enabled = bool(m.get("enabled", True))
+        # is_default
+        is_default = bool(m.get("is_default", False))
+        if is_default:
+            default_count += 1
+            if first_default_idx is None:
+                first_default_idx = len(out)
+
+        out.append({
+            "id": mid,
+            "name": name,
+            "provider": provider,
+            "protocol": protocol,
+            "base_url": base_url,
+            "model": model_id,
+            "enabled": enabled,
+            "is_default": False,  # 先全置 false，最后只保留一个
+        })
+
+    # 强制 is_default 至多一个：保留第一个标 true 的
+    if default_count > 0 and first_default_idx is not None:
+        out[first_default_idx]["is_default"] = True
+
+    return out
+
+
 def get_config_response() -> dict:
     cfg = get_runtime_config()
     defaults = _defaults_from_env()
@@ -308,6 +412,13 @@ def get_config_response() -> dict:
             "effective": non_secret_effective,
             "secrets": secrets_meta,
         },
+        "app": {
+            "models": [
+                {**m, "api_key_set": bool((secrets_raw or {}).get(f"model:{m['id']}:api_key"))}
+                for m in ((settings.get("app") or {}).get("models") or [])
+                if isinstance(m, dict)
+            ],
+        },
     }
 
 
@@ -377,6 +488,29 @@ def update_runtime_config(patch: dict, admin_user_id: str) -> dict:
             eff_interval = wd.get("interval_s", _defaults_from_env().watchdog.interval_s)
             if eff_interval >= eff_stale:
                 raise ValueError("watchdog.interval_s must be < stale_secs")
+
+        if "app" in patch and isinstance(patch["app"], dict):
+            app_cfg = settings.setdefault("app", {})
+            new_models_raw = patch["app"].get("models")
+            if new_models_raw is not None:
+                app_cfg["models"] = _validate_app_models(new_models_raw)
+
+        if "model_api_keys" in patch and isinstance(patch["model_api_keys"], dict):
+            # 已知 ID 校验：必须是已存在或本次 patch 引入的
+            known_ids = {m["id"] for m in (settings.get("app", {}).get("models") or [])}
+            for mid, key in patch["model_api_keys"].items():
+                if not isinstance(mid, str) or not mid:
+                    raise ValueError(f"model_api_keys key must be non-empty string, got {mid!r}")
+                if mid not in known_ids:
+                    raise ValueError(f"model_api_keys: unknown model id {mid!r}")
+                if key is None:
+                    secrets.pop(f"model:{mid}:api_key", None)
+                elif key == "":
+                    raise ValueError(f"empty string not allowed for model_api_keys.{mid}")
+                elif not isinstance(key, str):
+                    raise ValueError(f"model_api_keys.{mid} must be string or null")
+                else:
+                    secrets[f"model:{mid}:api_key"] = key
 
         if "claude_env" in patch and isinstance(patch["claude_env"], dict):
             ce = settings.setdefault("claude_env", {})
