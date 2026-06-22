@@ -201,16 +201,32 @@ def chat_json(
 
 # ── 三个 AI 端点用的 system prompts ─────────────────────────
 
-SYSTEM_OPTIMIZE_PROMPT = """你是 PPT 创作助手。根据用户提供的"主题 + 场景 + 受众 + 语调"，输出一段扩展后的、适合交给 PPT 生成 agent 的中文描述。
+SYSTEM_OPTIMIZE_PROMPT = """你是 PPT 创作助手。根据用户提供的主题，输出一段扩展后的、适合交给 PPT 生成 agent 的中文描述。
 
 要求：
 - 明确核心信息（这个 deck 想传达什么）
 - 列出 3-5 个关键观点（要传达给受众的洞察）
 - 给出建议的叙事结构（一两句话：先讲什么、后讲什么、如何收尾）
-- 语言：根据用户传入的 lang 决定（zh=中文，en=English，bilingual=中英混合）
-- 长度：150-400 字
+- 顺便根据主题推荐 5 个默认设置（用户可手动改）：
+  * language: zh / en / bilingual（首选 zh，除非主题明显是英文内容）
+  * scenario: general / proposal / product / training / popular_science / speech / project_report
+    （按主题选最贴近的；不确定就用 general）
+  * audience: general / executive / team / client / expert / student
+  * tone: professional / friendly / technical / academic / concise
+  * page_count: 3-30 的整数，按内容厚度合理推荐（短介绍 5-7、综合汇报 8-12、培训/课程 12-20、长篇综述 20+）
+
 - 仅输出 JSON，键名固定：
-  {"optimized_prompt": "<扩展后的描述>", "key_points": ["...", "...", "..."]}
+  {
+    "optimized_prompt": "<扩展后的描述>",
+    "key_points": ["...", "...", "..."],
+    "suggested_options": {
+      "language": "...",
+      "scenario": "...",
+      "audience": "...",
+      "tone": "...",
+      "page_count": <int>
+    }
+  }
 不要输出 markdown 围栏、不要解释、不要寒暄。"""
 
 SYSTEM_GENERATE_OUTLINE = """你是 PPT 大纲设计师。根据用户提供的主题与目标页数，生成一个适合该场景的结构化大纲。
@@ -244,6 +260,33 @@ image_strategy 取自：ai, web, provided, placeholder, none
 不要 markdown 围栏。"""
 
 
+_VALID_LANGUAGES = {"zh", "en", "bilingual"}
+_VALID_SCENARIOS = {
+    "general", "proposal", "product", "training",
+    "popular_science", "speech", "project_report",
+}
+_VALID_AUDIENCES = {
+    "general", "executive", "team", "client", "expert", "student",
+}
+_VALID_TONES = {"professional", "friendly", "technical", "academic", "concise"}
+
+
+def _pick_enum(raw: Any, allowed: set[str], default: str) -> str:
+    """如果 raw ∈ allowed 返回它，否则返回 default。"""
+    if isinstance(raw, str) and raw in allowed:
+        return raw
+    return default
+
+
+def _pick_int(raw: Any, lo: int, hi: int, default: int) -> int:
+    """如果 raw 是 lo..hi 范围内的整数，返回它，否则返回 default。"""
+    if isinstance(raw, bool):  # bool 是 int 子类，先排除
+        return default
+    if isinstance(raw, int) and lo <= raw <= hi:
+        return raw
+    return default
+
+
 def optimize_prompt(
     core_topic: str,
     scenario: str,
@@ -251,25 +294,39 @@ def optimize_prompt(
     tone: str,
     language: str = "zh",
 ) -> tuple[dict, dict]:
-    """调用默认模型优化用户输入的简短主题，输出结构化扩展描述。"""
-    user = (
-        f"主题：{core_topic}\n"
-        f"场景：{scenario}\n"
-        f"受众：{audience}\n"
-        f"语调：{tone}\n"
-        f"语言：{language}"
-    )
+    """调用默认模型优化用户输入的简短主题，输出结构化扩展描述。
+
+    返回 {"optimized_prompt", "key_points", "suggested_options"}，其中
+    suggested_options 是经枚举白名单校验的干净 dict（无效字段走调用方传入的原值兜底）。
+    """
+    user = f"主题：{core_topic}"
     parsed, info = chat_json(SYSTEM_OPTIMIZE_PROMPT, user, max_tokens=1500)
-    # 兜底字段
+
     optimized = parsed.get("optimized_prompt") or core_topic
     if not isinstance(optimized, str) or not optimized.strip():
         optimized = core_topic
+
     key_points = parsed.get("key_points") or []
     if not isinstance(key_points, list):
         key_points = []
+
+    suggested_raw = parsed.get("suggested_options") or {}
+    if not isinstance(suggested_raw, dict):
+        suggested_raw = {}
+
+    # 校验 enum + 范围；不合法用调用方原值兜底
+    suggested_options = {
+        "language": _pick_enum(suggested_raw.get("language"), _VALID_LANGUAGES, language),
+        "scenario": _pick_enum(suggested_raw.get("scenario"), _VALID_SCENARIOS, scenario),
+        "audience": _pick_enum(suggested_raw.get("audience"), _VALID_AUDIENCES, audience),
+        "tone": _pick_enum(suggested_raw.get("tone"), _VALID_TONES, tone),
+        "page_count": _pick_int(suggested_raw.get("page_count"), 3, 30, 5),
+    }
+
     return {
         "optimized_prompt": str(optimized).strip(),
         "key_points": [str(x).strip() for x in key_points if str(x).strip()][:8],
+        "suggested_options": suggested_options,
     }, info
 
 

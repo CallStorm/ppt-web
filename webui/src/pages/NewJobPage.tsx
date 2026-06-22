@@ -142,6 +142,31 @@ export function NewJobPage() {
   }
 
   // ── AI 回调 ──
+  // 把 suggested_options 应用到 options 状态（仅填已知枚举字段）
+  const applySuggestedOptions = (raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return
+    const s = raw as Record<string, unknown>
+    setOptions((o) => {
+      const next = { ...o }
+      if (typeof s.language === 'string' && LANGUAGE_OPTIONS.some((x) => x.value === s.language)) {
+        next.language = s.language as JobOptions['language']
+      }
+      if (typeof s.scenario === 'string' && SCENARIO_OPTIONS.some((x) => x.value === s.scenario)) {
+        next.scenario = s.scenario as JobOptions['scenario']
+      }
+      if (typeof s.audience === 'string' && AUDIENCE_OPTIONS.some((x) => x.value === s.audience)) {
+        next.audience = s.audience as JobOptions['audience']
+      }
+      if (typeof s.tone === 'string' && TONE_OPTIONS.some((x) => x.value === s.tone)) {
+        next.tone = s.tone as JobOptions['tone']
+      }
+      if (typeof s.page_count === 'number' && s.page_count >= 3 && s.page_count <= 30) {
+        next.page_count = s.page_count
+      }
+      return next
+    })
+  }
+
   const onOptimizePrompt = (data: Record<string, unknown>) => {
     const text = (data.optimized_prompt as string | undefined)?.trim()
     if (text) setCoreTopic(text)
@@ -149,6 +174,13 @@ export function NewJobPage() {
     if (Array.isArray(kp) && kp.length > 0) {
       setKeyPointsText((prev) => (prev.trim() ? prev + '\n' : '') + kp.join('\n'))
     }
+    // 顺便把 5 字段一起填（用户可手动改）
+    applySuggestedOptions(data.suggested_options)
+  }
+
+  const onResuggestOptions = (data: Record<string, unknown>) => {
+    // 只填 5 字段，不动 core_topic
+    applySuggestedOptions(data.suggested_options)
   }
   const onGenerateOutline = (data: Record<string, unknown>) => {
     const lines = data.outline
@@ -181,10 +213,10 @@ export function NewJobPage() {
       </div>
 
       <div className="space-y-6">
-        {/* ── ① 基础信息 ─────────────────────────────────────── */}
+        {/* ── ① 项目 ──────────────────────────────────────────── */}
         <section className="space-y-3">
           <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            ① 基础信息
+            ① 项目
           </h2>
           <label className="block">
             <span className="text-xs text-slate-500">项目名称（可选）</span>
@@ -195,52 +227,6 @@ export function NewJobPage() {
               placeholder="例：Q1 产品发布"
             />
           </label>
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-            <OptionSelect
-              label="语言"
-              options={LANGUAGE_OPTIONS}
-              value={options.language}
-              onChange={(v) => set('language', v)}
-              className="flex-1 min-w-[6.5rem]"
-            />
-            <OptionSelect
-              label="场景"
-              options={SCENARIO_OPTIONS}
-              value={options.scenario}
-              onChange={(v) => set('scenario', v)}
-              className="flex-1 min-w-[7.5rem]"
-            />
-            <OptionSelect
-              label="受众"
-              options={AUDIENCE_OPTIONS}
-              value={options.audience}
-              onChange={(v) => set('audience', v)}
-              className="flex-1 min-w-[7.5rem]"
-            />
-            <OptionSelect
-              label="语调"
-              options={TONE_OPTIONS}
-              value={options.tone}
-              onChange={(v) => set('tone', v)}
-              className="flex-1 min-w-[6.5rem]"
-            />
-            <label className="flex w-20 flex-none flex-col gap-0.5">
-              <span className="text-xs text-slate-500">页数</span>
-              <select
-                value={String(options.page_count)}
-                onChange={(e) =>
-                  set('page_count', parseInt(e.target.value, 10) as JobOptions['page_count'])
-                }
-                className={SELECT_CLASS}
-              >
-                {PAGE_COUNT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
         </section>
 
         {/* ── ② 内容输入 ─────────────────────────────────────── */}
@@ -248,7 +234,6 @@ export function NewJobPage() {
           <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">
             ② 内容输入
           </h2>
-          <FileUploadZone files={files} onChange={setFiles} />
 
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -276,6 +261,75 @@ export function NewJobPage() {
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               placeholder="一句话描述这个 PPT 的主题。例：介绍我们的新产品 X，面向企业客户，核心是提升效率。"
             />
+          </div>
+
+          <FileUploadZone files={files} onChange={setFiles} />
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                推荐设置（语言 / 场景 / 受众 / 语调 / 页数）
+              </span>
+              <AiOptimizeButton
+                endpoint="optimize-prompt"
+                body={{
+                  core_topic: coreTopic.trim() || '(空)',
+                  scenario: options.scenario,
+                  audience: options.audience,
+                  tone: options.tone,
+                  language: options.language,
+                }}
+                label="重新推荐"
+                onResult={onResuggestOptions}
+                disabled={!coreTopic.trim()}
+              />
+            </div>
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <OptionSelect
+                label="语言"
+                options={LANGUAGE_OPTIONS}
+                value={options.language}
+                onChange={(v) => set('language', v)}
+                className="flex-1 min-w-[6.5rem]"
+              />
+              <OptionSelect
+                label="场景"
+                options={SCENARIO_OPTIONS}
+                value={options.scenario}
+                onChange={(v) => set('scenario', v)}
+                className="flex-1 min-w-[7.5rem]"
+              />
+              <OptionSelect
+                label="受众"
+                options={AUDIENCE_OPTIONS}
+                value={options.audience}
+                onChange={(v) => set('audience', v)}
+                className="flex-1 min-w-[7.5rem]"
+              />
+              <OptionSelect
+                label="语调"
+                options={TONE_OPTIONS}
+                value={options.tone}
+                onChange={(v) => set('tone', v)}
+                className="flex-1 min-w-[6.5rem]"
+              />
+              <label className="flex w-20 flex-none flex-col gap-0.5">
+                <span className="text-xs text-slate-500">页数</span>
+                <select
+                  value={String(options.page_count)}
+                  onChange={(e) =>
+                    set('page_count', parseInt(e.target.value, 10) as JobOptions['page_count'])
+                  }
+                  className={SELECT_CLASS}
+                >
+                  {PAGE_COUNT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
 
           <div>
