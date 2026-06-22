@@ -187,6 +187,15 @@ def reload_runtime_config() -> RuntimeConfig:
     return get_runtime_config(force_reload=True)
 
 
+def get_secrets_raw() -> dict[str, str]:
+    """Backend-only: 原始 secrets 字典（不解密/不 mask）。
+
+    仅供后端内部使用（如 LLM 客户端读 model API key）。**严禁**通过 API 暴露。
+    """
+    _, secrets, _ = _load_db_raw()
+    return secrets if isinstance(secrets, dict) else {}
+
+
 def build_claude_env() -> dict[str, str]:
     """合并 host env + DB override + secrets，注入 Docker 容器。"""
     defaults = _host_claude_defaults()

@@ -48,8 +48,30 @@ async def create_job(
     audience: Annotated[str, Form()] = "general",
     tone: Annotated[str, Form()] = "professional",
     page_count: Annotated[int, Form()] = 5,
+    # ── 新增 Tier-1（全部 optional，缺失走默认值） ──
+    canvas: Annotated[str, Form()] = "ppt169",
+    mode: Annotated[str, Form()] = "briefing",
+    visual_style: Annotated[str | None, Form()] = None,
+    color_mode: Annotated[str, Form()] = "auto",
+    brand_hex: Annotated[str | None, Form()] = None,
+    industry: Annotated[str | None, Form()] = None,
+    image_strategy: Annotated[str, Form()] = "web",
+    core_topic: Annotated[str | None, Form()] = None,
+    outline: Annotated[str, Form()] = "",  # 多行文本，前端用 \n 拼
+    key_points: Annotated[str, Form()] = "",
+    # ── 高级 ──
+    icon_strategy: Annotated[str, Form()] = "library",
+    formula_policy: Annotated[str, Form()] = "mixed",
+    include_speaker_notes: Annotated[bool, Form()] = True,
+    split_mode: Annotated[bool, Form()] = False,
     files: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
+    # 多行字段 → list（空串表示没填）
+    outline_list = [s.strip() for s in outline.split("\n") if s.strip()] if outline else None
+    key_points_list = (
+        [s.strip() for s in key_points.split("\n") if s.strip()] if key_points else None
+    )
+
     try:
         opts = job_options_from_form(
             language=language,
@@ -57,6 +79,20 @@ async def create_job(
             audience=audience,
             tone=tone,
             page_count=page_count,
+            canvas=canvas,
+            mode=mode,
+            visual_style=visual_style,
+            color_mode=color_mode,
+            brand_hex=brand_hex,
+            industry=industry,
+            image_strategy=image_strategy,
+            core_topic=core_topic,
+            outline=outline_list,
+            key_points=key_points_list,
+            icon_strategy=icon_strategy,
+            formula_policy=formula_policy,
+            include_speaker_notes=include_speaker_notes,
+            split_mode=split_mode,
         )
     except ValidationError as e:
         raise HTTPException(422, detail=e.errors()) from e
