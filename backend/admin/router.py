@@ -114,6 +114,9 @@ class SettingsPatch(BaseModel):
     watchdog: dict | None = None
     claude_env: dict | None = None
     secrets: dict | None = None
+    # 应用设置：模型配置
+    app: dict | None = None           # {"models": [...]}；后端整列表覆盖
+    model_api_keys: dict | None = None  # {"<model_id>": "sk-..." or null}；null = 删除
 
 
 @router.patch("/settings")
