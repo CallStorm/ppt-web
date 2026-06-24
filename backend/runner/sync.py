@@ -77,7 +77,7 @@ def run_sync(
             "pptx_path": None,
             "cost_usd": None,
             "last_agent_text": None,
-            "error_message": _humanize_run_error(str(e), job_id),
+            "error_message": _humanize_run_error(f"claude CLI 失败: {e}", job_id),
         }
 
     if result.get("_cancelled"):
@@ -145,7 +145,7 @@ def run_sync(
                     "pptx_path": None,
                     "cost_usd": None,
                     "last_agent_text": None,
-                    "error_message": _humanize_run_error(str(e), job_id),
+                    "error_message": _humanize_run_error(f"auto-resume claude CLI 失败: {e}", job_id),
                 }
             if resume_result.get("_cancelled"):
                 return {
@@ -259,7 +259,7 @@ def resume_sync(
             "pptx_path": None,
             "cost_usd": None,
             "last_agent_text": None,
-            "error_message": _humanize_run_error(str(e), job_id),
+            "error_message": _humanize_run_error(f"claude CLI 失败: {e}", job_id),
         }
 
     if result.get("_cancelled"):
