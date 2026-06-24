@@ -32,15 +32,16 @@ export function AppShell() {
           {isAdmin() && (
             <Link
               to="/admin"
-              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               管理后台
             </Link>
           )}
         </nav>
-        <div className="ml-auto flex items-center gap-3 text-sm">
+        <div className="ml-auto flex items-center gap-4 text-sm">
           <span className="hidden text-slate-500 sm:inline dark:text-slate-400">{me?.email}</span>
-          <span className="rounded-full bg-gemini-50 px-2 py-0.5 text-xs font-medium text-gemini-700 dark:bg-gemini-900/30 dark:text-gemini-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-gemini-50 px-2 py-0.5 text-xs font-medium text-gemini-700 dark:bg-gemini-900/30 dark:text-gemini-200">
+            <span aria-hidden>◆</span>
             {me?.quota_credits ?? 0} credits
           </span>
           <button
