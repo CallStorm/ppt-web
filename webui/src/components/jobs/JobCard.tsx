@@ -18,15 +18,15 @@ export function JobCard({ job }: { job: Job }) {
   const deleteJob = useDeleteJob()
   const retryJob = useRetryJob()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [previewOk, setPreviewOk] = useState(!!job.has_preview && isDone)
+  const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Only done jobs (or ones with an explicit preview) attempt an <img>;
-  // everything else shows CoverPlaceholder — no broken/white box.
-  useEffect(() => {
-    setPreviewOk(!!job.has_preview && isDone)
-  }, [job.has_preview, job.id, isDone])
+  // previewOk is derived from props + a local failure flag set on <img> onError;
+  // no syncing effect, so no react-hooks/set-state-in-effect advisory.
+  // previewFailed resets naturally on job change because the parent renders
+  // <JobCard key={job.id} ...>, remounting the component per job.
+  const previewOk = !!job.has_preview && isDone && !previewFailed
 
   useEffect(() => {
     if (!menuOpen) return
@@ -112,7 +112,7 @@ export function JobCard({ job }: { job: Job }) {
               alt={job.project_name || '封面预览'}
               className="h-full w-full object-cover object-top"
               loading="lazy"
-              onError={() => setPreviewOk(false)}
+              onError={() => setPreviewFailed(true)}
             />
           ) : (
             <CoverPlaceholder status={job.status} id={job.id} />
