@@ -12,8 +12,11 @@ const STATUS_CLASS: Record<JobStatus, string> = {
 
 export function StatusPill({ status }: { status: JobStatus | string }) {
   const cls = STATUS_CLASS[status as JobStatus] || 'status-queued'
-  const pulse = status === 'running' ? ' status-running-pulse' : ''
+  const isRunning = status === 'running'
   return (
-    <span className={`status-pill ${cls}${pulse}`}>{statusLabel(status)}</span>
+    <span className={`status-pill ${cls}${isRunning ? ' status-running-pulse' : ''}`}>
+      {isRunning && <span className="status-running-dot" />}
+      {statusLabel(status)}
+    </span>
   )
 }
