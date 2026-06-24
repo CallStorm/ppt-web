@@ -77,3 +77,13 @@ export function useDeleteJob() {
     },
   })
 }
+
+export function useRetryJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api<{ id: string; status: string }>('POST', `/api/jobs/${id}/retry`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: JOBS_KEY })
+    },
+  })
+}
