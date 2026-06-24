@@ -82,8 +82,9 @@ export function useRetryJob() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api<{ id: string; status: string }>('POST', `/api/jobs/${id}/retry`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: JOBS_KEY })
+      qc.invalidateQueries({ queryKey: jobKey(id) })
     },
   })
 }
