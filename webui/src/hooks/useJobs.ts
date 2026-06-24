@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { Job, JobListResponse } from '../api/types'
+import type { Job, JobListResponse, JobSlidesResponse } from '../api/types'
 
 export const JOBS_KEY = ['jobs'] as const
 export const jobKey = (id: string) => ['job', id] as const
+export const jobSlidesKey = (id: string) => ['job', id, 'slides'] as const
 
 async function fetchJobs(): Promise<Job[]> {
   const data = await api<JobListResponse>('GET', '/api/jobs')
@@ -23,6 +24,28 @@ export function useJob(id: string | undefined) {
     queryKey: jobKey(id ?? ''),
     queryFn: () => api<Job>('GET', `/api/jobs/${id}`),
     enabled: !!id,
+  })
+}
+
+export function useJobSlides(jobId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: jobSlidesKey(jobId ?? ''),
+    queryFn: () => api<JobSlidesResponse>('GET', `/api/jobs/${jobId}/slides`),
+    enabled: !!jobId && enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+export function useJobSlideNotes(
+  jobId: string | undefined,
+  slideIndex: number | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['job', jobId, 'slides', slideIndex, 'notes'],
+    queryFn: () => api<string>('GET', `/api/jobs/${jobId}/slides/${slideIndex}/notes`),
+    enabled: !!jobId && slideIndex !== undefined && enabled,
+    staleTime: 5 * 60 * 1000,
   })
 }
 

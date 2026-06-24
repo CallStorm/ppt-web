@@ -8,6 +8,7 @@ import { QueueBadge } from './QueueBadge'
 import { confirmDialog } from '../../stores/modalStore'
 import { useDeleteJob } from '../../hooks/useJobs'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import { SlidePreviewModal } from './SlidePreviewModal'
 
 export function JobCard({ job }: { job: Job }) {
   const hasPptx = !!job.pptx_path
@@ -16,6 +17,7 @@ export function JobCard({ job }: { job: Job }) {
   const deleteJob = useDeleteJob()
   const [menuOpen, setMenuOpen] = useState(false)
   const [previewOk, setPreviewOk] = useState(!!job.has_preview || isDone)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -38,6 +40,12 @@ export function JobCard({ job }: { job: Job }) {
     e.stopPropagation()
     if (!hasPptx) return
     downloadUrl(`/api/jobs/${job.id}/pptx`, `${job.project_name || job.id}.pptx`)
+  }
+
+  const handlePreview = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setPreviewOpen(true)
   }
 
   const handleMenuToggle = (e: React.MouseEvent) => {
@@ -100,20 +108,36 @@ export function JobCard({ job }: { job: Job }) {
         </Link>
 
         <div className="flex shrink-0 items-center gap-1">
-          {showDownload ? (
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="rounded-md p-1.5 text-gemini-600 transition-colors hover:bg-gemini-100 dark:hover:bg-gemini-900/30"
-              title="下载 PPTX"
-              aria-label="下载 PPTX"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-            </button>
+          {isDone ? (
+            <>
+              <button
+                type="button"
+                onClick={handlePreview}
+                className="rounded-md p-1.5 text-gemini-600 transition-colors hover:bg-gemini-100 dark:hover:bg-gemini-900/30"
+                title="预览"
+                aria-label="预览"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+              {showDownload && (
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="rounded-md p-1.5 text-gemini-600 transition-colors hover:bg-gemini-100 dark:hover:bg-gemini-900/30"
+                  title="下载 PPTX"
+                  aria-label="下载 PPTX"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
+              )}
+            </>
           ) : (
             <div className="flex items-center gap-1">
               <StatusPill status={job.status} />
@@ -149,6 +173,14 @@ export function JobCard({ job }: { job: Job }) {
           </div>
         </div>
       </div>
+
+      {previewOpen && (
+        <SlidePreviewModal
+          jobId={job.id}
+          jobName={job.project_name || '(未命名)'}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </article>
   )
 }

@@ -21,7 +21,7 @@ from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
 from backend.paths import ensure_data_dirs, is_under, project_root_for, safe_stage_name, uploads_dir_for
-from backend.runner.preview import find_cover_preview
+from backend.runner.preview import find_cover_preview, list_slides
 from backend.runtime import (
     cancel_active,
     is_active,
@@ -365,6 +365,90 @@ async def download_preview(job_id: str, user: CurrentUser):
 
         media_type = _PREVIEW_MEDIA.get(preview.suffix.lower(), "application/octet-stream")
         return FileResponse(preview, media_type=media_type)
+
+
+def _verified_slides(j: Job) -> list[dict]:
+    """Ordered slide descriptors for ``j``, path-traversal-guarded.
+
+    Mirrors the allowed-roots check used by ``/preview``: a slide file must live
+    under either the user's project root or the recorded ``project_dir`` parent.
+    """
+    project_dir = resolve_job_project_dir(j)
+    slides = list_slides(project_dir)
+    if not slides:
+        return []
+
+    allowed_roots: list[Path] = []
+    if j.user_id:
+        allowed_roots.append(project_root_for(j.user_id, j.id).resolve())
+    if j.project_dir:
+        allowed_roots.append(Path(j.project_dir).resolve().parent)
+
+    verified: list[dict] = []
+    for sl in slides:
+        try:
+            resolved = sl["path"].resolve()
+        except (OSError, ValueError):
+            continue
+        if any(is_under(resolved, root) for root in allowed_roots):
+            verified.append(sl)
+    return verified
+
+
+@router.get("/{job_id}/slides")
+async def list_job_slides(job_id: str, user: CurrentUser) -> dict:
+    """Per-slide manifest for the preview modal (PNG render if present, else SVG)."""
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    slides = _verified_slides(j)
+    if not slides:
+        raise HTTPException(404, "no slides available")
+    return {
+        "slides": [
+            {
+                "index": sl["index"],
+                "name": sl["name"],
+                "image_url": f"/api/jobs/{job_id}/slides/{sl['index']}",
+                "has_notes": sl["has_notes"],
+                "notes_url": f"/api/jobs/{job_id}/slides/{sl['index']}/notes" if sl["has_notes"] else None,
+            }
+            for sl in slides
+        ]
+    }
+
+
+@router.get("/{job_id}/slides/{slide_index}")
+async def get_job_slide(job_id: str, slide_index: int, user: CurrentUser):
+    """A single slide image (SVG, or PNG when a render exists)."""
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    slides = _verified_slides(j)
+    if not slides:
+        raise HTTPException(404, "no slides available")
+    sl = next((x for x in slides if x["index"] == slide_index), None)
+    if not sl:
+        raise HTTPException(404, f"slide {slide_index} not found")
+    return FileResponse(sl["path"], media_type=sl["media_type"])
+
+
+@router.get("/{job_id}/slides/{slide_index}/notes")
+async def get_job_slide_notes(job_id: str, slide_index: int, user: CurrentUser) -> str:
+    """Speaker notes (Markdown) for a single slide, as plain text."""
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    slides = _verified_slides(j)
+    if not slides:
+        raise HTTPException(404, "no slides available")
+    sl = next((x for x in slides if x["index"] == slide_index), None)
+    if not sl or not sl["has_notes"] or sl["notes_path"] is None:
+        raise HTTPException(404, "notes not found")
+    try:
+        return sl["notes_path"].read_text(encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(500, f"cannot read notes: {e}") from e
 
 
 @router.delete("/{job_id}")

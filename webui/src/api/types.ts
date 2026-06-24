@@ -49,6 +49,18 @@ export interface JobListResponse {
   jobs: Job[]
 }
 
+export interface Slide {
+  index: number
+  name: string
+  image_url: string
+  has_notes: boolean
+  notes_url: string | null
+}
+
+export interface JobSlidesResponse {
+  slides: Slide[]
+}
+
 export interface SseEvent {
   type: string
   payload: Record<string, unknown>
