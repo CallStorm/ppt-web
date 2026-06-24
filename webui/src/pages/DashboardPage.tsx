@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { JobCard } from '../components/jobs/JobCard'
+import { SkeletonCard } from '../components/jobs/SkeletonCard'
+import { StatusFilter, type StatusFilterValue } from '../components/jobs/StatusFilter'
 import { useJobs } from '../hooks/useJobs'
 import type { Job } from '../api/types'
 
-type Filter = 'all' | 'running' | 'done' | 'failed'
+type Filter = StatusFilterValue
 
 function matchesFilter(job: Job, filter: Filter): boolean {
   if (filter === 'all') return true
@@ -31,21 +33,18 @@ export function DashboardPage() {
     })
   }, [jobs, filter, query])
 
-  const filters: { key: Filter; label: string }[] = [
-    { key: 'all', label: '全部' },
-    { key: 'running', label: '运行中' },
-    { key: 'done', label: '完成' },
-    { key: 'failed', label: '失败' },
-  ]
+  const reduced = filtered.length !== jobs.length
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">我的作品</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            共 {jobs.length} 个作品
-          </p>
+          <h1 className="text-xl font-semibold">
+            我的作品
+            <span className="ml-2 text-sm font-normal text-slate-400">
+              ({reduced ? `${filtered.length}/${jobs.length}` : jobs.length})
+            </span>
+          </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -55,30 +54,16 @@ export function DashboardPage() {
             placeholder="搜索作品…"
             className="w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-gemini-500 focus:outline-none sm:w-56 dark:border-slate-700 dark:bg-slate-800"
           />
-          <div className="flex items-center gap-1 text-xs">
-            {filters.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={`rounded px-2 py-0.5 ${
-                  filter === f.key
-                    ? 'bg-gemini-600 text-white'
-                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-            <span className="ml-2 text-slate-400">
-              {filtered.length}/{jobs.length}
-            </span>
-          </div>
+          <StatusFilter value={filter} onChange={setFilter} />
         </div>
       </div>
 
       {isLoading ? (
-        <div className="py-20 text-center text-slate-400">加载中…</div>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-sm text-slate-400">
