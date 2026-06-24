@@ -29,11 +29,16 @@ body {
 .status-paused { @apply bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200; }
 .status-done { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300; }
 .status-failed { @apply bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300; }
-.status-cancelled { @apply bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400; }
+.status-cancelled { @apply bg-slate-50 text-slate-400 line-through dark:bg-slate-800/60 dark:text-slate-500; }
 
 .queue-badge {
   @apply inline-flex items-center rounded px-1.5 py-0.5 text-xs font-mono
          bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300;
+}
+
+.status-running-dot {
+  @apply mr-1 inline-block h-1.5 w-1.5 rounded-full bg-blue-500;
+  animation: pulse-ring 1.2s ease-in-out infinite;
 }
 
 .sse-dot {
@@ -48,4 +53,18 @@ body {
 }
 .status-running-pulse {
   animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg, rgb(241 245 249) 25%, rgb(226 232 240) 50%, rgb(241 245 249) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.dark .skeleton-shimmer {
+  background: linear-gradient(90deg, rgb(30 41 59) 25%, rgb(51 65 85) 50%, rgb(30 41 59) 75%);
+  background-size: 200% 100%;
 }
