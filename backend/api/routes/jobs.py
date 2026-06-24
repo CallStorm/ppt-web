@@ -229,6 +229,51 @@ async def resume_job_endpoint(
     return {"id": job_id, "status": "queued"}
 
 
+@router.post("/{job_id}/retry")
+async def retry_job_endpoint(job_id: str, user: CurrentUser) -> dict:
+    """原地重试：把 failed/cancelled job 复位成 queued，重新走 run_job（非 resume）。
+
+    - 重新扣 owner 1 credit（admin 触发也由 owner 付）。
+    - 清旧产物：rmtree project_root（runner 会重新 mkdir）。
+    - 复用上传文件：不动 uploads 目录，dispatcher 的 _collect_upload_paths 会重扫。
+    - 绝不用 resume_job——失败任务 session 已死，需全新生成。
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+        if j.status not in ("failed", "cancelled"):
+            raise HTTPException(
+                409, f"job status is {j.status}, can only retry failed/cancelled jobs"
+            )
+        if not j.user_id:
+            raise HTTPException(400, "job has no owner to charge")
+        u = s.get(User, j.user_id)
+        if not u:
+            raise HTTPException(400, "owner user not found")
+        if u.quota_credits <= 0:
+            raise HTTPException(402, "quota exhausted")
+        # 重新计费 + 复位行
+        u.quota_credits -= 1
+        j.status = "queued"
+        j.error_message = None
+        j.session_id = None
+        j.pptx_path = None
+        j.cost_usd = 0
+        j.project_dir = None
+        j.pending_confirm = None
+        s.commit()
+        owner_id = j.user_id
+
+    # 清旧产物（runner 重新 mkdir）。uploads 目录不动——复用原上传文件。
+    if owner_id:
+        proj = project_root_for(owner_id, job_id)
+        if proj.exists():
+            shutil.rmtree(proj, ignore_errors=True)
+
+    notify_dispatcher()
+    return {"id": job_id, "status": "queued"}
+
+
 @router.post("/{job_id}/cancel")
 async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
