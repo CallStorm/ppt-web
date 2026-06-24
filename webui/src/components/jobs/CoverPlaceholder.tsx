@@ -11,7 +11,7 @@ const ACTIVE: JobStatus[] = ['queued', 'running', 'paused']
  */
 export function CoverPlaceholder({ status, id }: { status: JobStatus | string; id: string }) {
   const color = colorFromId(id)
-  const gradient = `linear-gradient(135deg, ${color}26, ${color}10)`
+  const gradient = `linear-gradient(135deg, color-mix(in srgb, ${color} 15%, transparent), color-mix(in srgb, ${color} 6%, transparent))`
   const isActive = ACTIVE.includes(status as JobStatus)
 
   return (
