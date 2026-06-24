@@ -7,6 +7,7 @@ import logging
 from backend.db.session import SessionLocal, init_db
 from backend.models import Job as DbJob
 from backend.runtime import state
+from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runtime.init")
 
@@ -24,6 +25,7 @@ def cleanup_stuck_jobs() -> int:
         running = s.query(DbJob).filter(DbJob.status == "running").all()
         for j in running:
             j.status = "failed"
-            j.error_message = "server restart interrupted your previous run"
+            log.warning("job %s restart-interrupt raw: server restart interrupted", j.id)
+            j.error_message = humanize_error("server restart interrupted your previous run")
         s.commit()
         return len(running)

@@ -12,6 +12,7 @@ from backend.models import Job as DbJob
 from backend.models import User
 from backend.paths import project_root_for
 from backend.runner.docker import check_docker_runner_ready
+from backend.runner.errors import humanize_error
 from backend.runtime import state
 from backend.runtime.events import _enqueue_event, _event_to_db_payload
 from backend.runtime.init import init_runtime
@@ -163,7 +164,8 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
             j = s.get(DbJob, job_id)
             if j:
                 j.status = "failed"
-                j.error_message = docker_err
+                log.warning("job %s docker not ready raw: %s", job_id, docker_err)
+                j.error_message = humanize_error(docker_err)
                 if j.user_id:
                     u = s.get(User, j.user_id)
                     if u:
@@ -234,7 +236,8 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
             j = s.get(DbJob, job_id)
             if j:
                 j.status = "failed"
-                j.error_message = f"runner exception: {e}"
+                log.warning("job %s runner exception raw: %s", job_id, e)
+                j.error_message = humanize_error(f"runner exception: {e}")
                 s.commit()
             # runner 异常 refund 1 credit（pre-decrement 的对冲）。
             # 正常 run_sync 返回的 status="failed"（claude 跑完但没出 pptx）不 refund。
@@ -286,7 +289,8 @@ async def resume_job(job_id: str, confirm: str) -> None:
             j = s.get(DbJob, job_id)
             if j:
                 j.status = "failed"
-                j.error_message = docker_err
+                log.warning("job %s docker not ready raw: %s", job_id, docker_err)
+                j.error_message = humanize_error(docker_err)
                 s.commit()
         _enqueue_event(job_id, "status", {"status": "failed"})
         _enqueue_event(job_id, "error", {"message": docker_err})
@@ -331,7 +335,8 @@ async def resume_job(job_id: str, confirm: str) -> None:
             j = s.get(DbJob, job_id)
             if j:
                 j.status = "failed"
-                j.error_message = f"resume exception: {e}"
+                log.warning("job %s resume exception raw: %s", job_id, e)
+                j.error_message = humanize_error(f"resume exception: {e}")
                 s.commit()
         _enqueue_event(job_id, "error", {"message": f"resume exception: {e}"})
     finally:

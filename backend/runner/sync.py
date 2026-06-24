@@ -10,8 +10,17 @@ from backend.api.schemas.job_options import JobOptions, parse_job_options
 from backend.runner.claude import stream_claude
 from backend.runner.constants import AUTO_CONFIRM_TEXT, SKIP_EIGHT_CONFIRM_MAX
 from backend.runner.stages import _project_snapshot, find_pptx, resolve_project_dir, build_initial_prompt
+from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runner.sync")
+
+
+def _humanize_run_error(raw: str | None, job_id: str | None) -> str | None:
+    """Log the raw error with job_id, return the humanized version."""
+    if raw:
+        log.warning("job %s failed raw error: %s", job_id, raw)
+    return humanize_error(raw)
+
 
 def run_sync(
     prompt: str,
@@ -68,7 +77,7 @@ def run_sync(
             "pptx_path": None,
             "cost_usd": None,
             "last_agent_text": None,
-            "error_message": str(e),
+            "error_message": _humanize_run_error(str(e), job_id),
         }
 
     if result.get("_cancelled"):
@@ -136,7 +145,7 @@ def run_sync(
                     "pptx_path": None,
                     "cost_usd": None,
                     "last_agent_text": None,
-                    "error_message": str(e),
+                    "error_message": _humanize_run_error(str(e), job_id),
                 }
             if resume_result.get("_cancelled"):
                 return {
@@ -196,10 +205,11 @@ def run_sync(
         "pptx_path": str(pptx) if pptx else None,
         "cost_usd": cost,
         "last_agent_text": last_text,
-        "error_message": (
+        "error_message": _humanize_run_error(
             None if status != "failed" else
             ("auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated"
-             if no_progress_bail else f"stop_reason={stop_reason}")
+             if no_progress_bail else f"stop_reason={stop_reason}"),
+            job_id,
         ),
         # run_job 看这个标志决定是否 refund credit
         "refund": no_progress_bail,
@@ -249,7 +259,7 @@ def resume_sync(
             "pptx_path": None,
             "cost_usd": None,
             "last_agent_text": None,
-            "error_message": str(e),
+            "error_message": _humanize_run_error(str(e), job_id),
         }
 
     if result.get("_cancelled"):
@@ -284,7 +294,9 @@ def resume_sync(
         "pptx_path": str(pptx) if pptx else None,
         "cost_usd": cost,
         "last_agent_text": last_text,
-        "error_message": None if status != "failed" else f"stop_reason={stop_reason}",
+        "error_message": _humanize_run_error(
+            None if status != "failed" else f"stop_reason={stop_reason}", job_id,
+        ),
     }
     on_event({"kind": "status", "status": status})
     return final

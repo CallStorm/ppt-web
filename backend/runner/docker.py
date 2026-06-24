@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from backend.config import build_claude_env, get_runtime_config
+from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runner.docker")
 
@@ -49,13 +50,21 @@ def check_docker_runner_ready(image: str | None = None) -> str | None:
             text=True,
         )
         if r.returncode != 0:
-            return "Docker daemon is not available (docker info failed)"
+            raw = "Docker daemon is not available (docker info failed)"
+            log.warning("docker runner not ready: %s", raw)
+            return humanize_error(raw)
     except FileNotFoundError:
-        return "docker CLI not found; install Docker and ensure it is on PATH"
+        raw = "docker CLI not found; install Docker and ensure it is on PATH"
+        log.warning("docker runner not ready: %s", raw)
+        return humanize_error(raw)
     except subprocess.TimeoutExpired:
-        return "docker info timed out"
+        raw = "docker info timed out"
+        log.warning("docker runner not ready: %s", raw)
+        return humanize_error(raw)
     except Exception as e:
-        return f"docker info failed: {e}"
+        raw = f"docker info failed: {e}"
+        log.warning("docker runner not ready: %s", raw)
+        return humanize_error(raw)
 
     try:
         r = subprocess.run(
@@ -66,12 +75,16 @@ def check_docker_runner_ready(image: str | None = None) -> str | None:
             text=True,
         )
         if r.returncode != 0:
-            return (
+            raw = (
                 f"Docker image {img!r} not found; "
                 "run: bash docker/ppt-runner/build.sh"
             )
+            log.warning("docker runner not ready: %s", raw)
+            return humanize_error(raw)
     except Exception as e:
-        return f"docker image inspect failed: {e}"
+        raw = f"docker image inspect failed: {e}"
+        log.warning("docker runner not ready: %s", raw)
+        return humanize_error(raw)
     return None
 
 

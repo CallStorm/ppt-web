@@ -11,6 +11,7 @@ from backend.db.session import SessionLocal, _is_sqlite
 from backend.models import Job as DbJob
 from backend.models import User
 from backend.runner.docker import stop_job_container
+from backend.runner.errors import humanize_error
 from backend.runtime import state
 from backend.runtime.events import _enqueue_event
 from backend.runtime.jobs import notify_dispatcher
@@ -64,10 +65,12 @@ def _sweep_stale_jobs() -> int:
             if stop_job_container(j.id):
                 stopped = True
             j.status = "failed"
-            j.error_message = (
+            raw = (
                 f"watchdog: no event for {threshold_seconds}s; "
                 f"stopped container={'yes' if stopped else 'no'}"
             )
+            log.warning("job %s watchdog raw: %s", j.id, raw)
+            j.error_message = humanize_error(raw)
             if j.user_id:
                 u = s.get(User, j.user_id)
                 if u:
