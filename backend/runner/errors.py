@@ -24,6 +24,7 @@ _DOCKER_SUBSTRINGS: tuple[str, ...] = (
     "docker info timed out",
     "docker info failed",
     "docker image inspect failed",
+    "docker image",
 )
 _DOCKER_FRIENDLY = "运行环境未就绪，请联系管理员"
 
