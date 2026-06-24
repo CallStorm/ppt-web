@@ -16,3 +16,12 @@ python-multipart==0.0.12
 # DB driver: MySQL（需先 docker 启动 MySQL，见 README）
 # DB_URL=mysql+pymysql://pptweb:pptweb@127.0.0.1:3306/pptweb?charset=utf8mb4
 pymysql>=1.1
+
+# Phase 3: 文档文本提取（智能填充文档模式，复用 ppt-master source_to_md 同款库）
+# 仅在 backend 进程内把上传文档转成 markdown 文本喂给 LLM，不写盘、不做图片处理
+PyMuPDF>=1.23.0          # PDF
+mammoth>=1.6.0           # DOCX
+python-pptx>=0.6.21      # PPTX（pin <0.7，见 ppt-master 说明）
+openpyxl>=3.1.0          # XLSX/XLSM
+markdownify>=0.11.6      # HTML → markdown
+beautifulsoup4>=4.12.0   # HTML 清洗

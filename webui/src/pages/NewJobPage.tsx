@@ -7,8 +7,9 @@ import { notifyError, notifySuccess } from '../stores/toastStore'
 import { JOBS_KEY } from '../hooks/useJobs'
 import { FileUploadZone } from '../components/jobs/FileUploadZone'
 import {
-  AiOptimizeButton,
+  getDefaultModelInfo,
   invalidateDefaultModelCache,
+  type ModelInfo,
 } from '../components/jobs/AiOptimizeButton'
 import {
   AUDIENCE_OPTIONS,
@@ -26,6 +27,9 @@ import {
   SCENARIO_OPTIONS,
   TONE_OPTIONS,
   VISUAL_STYLE_OPTIONS,
+  type JobColorMode,
+  type JobImageStrategy,
+  type JobIndustry,
   type JobOptions,
   type JobVisualStyle,
 } from '../lib/jobOptions'
@@ -72,6 +76,8 @@ const PAGE_COUNT_OPTIONS = Array.from(
   },
 )
 
+type CreateMode = 'topic' | 'document'
+
 export function NewJobPage() {
   const quota = useAuthStore((s) => s.quota)
   const navigate = useNavigate()
@@ -86,9 +92,18 @@ export function NewJobPage() {
   const [submitting, setSubmitting] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  // 内容输入模式：主题输入 / 文档输入（互斥）
+  const [mode, setMode] = useState<CreateMode>('topic')
+  const [autoFilling, setAutoFilling] = useState(false)
+
   const canSubmit = useMemo(
-    () => !submitting && !!coreTopic.trim() && quota() > 0,
-    [submitting, coreTopic, quota],
+    () =>
+      !submitting &&
+      !autoFilling &&
+      quota() > 0 &&
+      coreTopic.trim().length > 0 &&
+      (mode === 'topic' || files.length > 0),
+    [submitting, autoFilling, quota, coreTopic, mode, files],
   )
 
   const set = <K extends keyof JobOptions>(key: K, v: JobOptions[K]) =>
@@ -141,8 +156,8 @@ export function NewJobPage() {
     }
   }
 
-  // ── AI 回调 ──
-  // 把 suggested_options 应用到 options 状态（仅填已知枚举字段）
+  // ── 智能填充 ──
+  // 把后端返回的 suggested_options 应用到 options 状态（仅填已知枚举字段）
   const applySuggestedOptions = (raw: unknown) => {
     if (!raw || typeof raw !== 'object') return
     const s = raw as Record<string, unknown>
@@ -167,41 +182,111 @@ export function NewJobPage() {
     })
   }
 
-  const onOptimizePrompt = (data: Record<string, unknown>) => {
-    const text = (data.optimized_prompt as string | undefined)?.trim()
-    if (text) setCoreTopic(text)
-    const kp = data.key_points
-    if (Array.isArray(kp) && kp.length > 0) {
-      setKeyPointsText((prev) => (prev.trim() ? prev + '\n' : '') + kp.join('\n'))
-    }
-    // 顺便把 5 字段一起填（用户可手动改）
-    applySuggestedOptions(data.suggested_options)
+  const applyStyle = (raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return
+    const s = raw as Record<string, unknown>
+    setOptions((o) => {
+      const next = { ...o }
+      if (
+        typeof s.visual_style === 'string' &&
+        VISUAL_STYLE_OPTIONS.some((x) => x.value === s.visual_style)
+      ) {
+        next.visual_style = (s.visual_style === 'auto' ? 'auto' : s.visual_style) as JobVisualStyle
+      }
+      if (
+        typeof s.color_mode === 'string' &&
+        COLOR_MODE_OPTIONS.some((x) => x.value === s.color_mode)
+      ) {
+        next.color_mode = s.color_mode as JobColorMode
+      }
+      next.brand_hex = typeof s.brand_hex === 'string' && s.brand_hex ? s.brand_hex : null
+      if (
+        typeof s.industry === 'string' &&
+        INDUSTRY_OPTIONS.some((x) => x.value === s.industry)
+      ) {
+        next.industry = s.industry as JobIndustry
+      } else {
+        next.industry = null
+      }
+      if (
+        typeof s.image_strategy === 'string' &&
+        IMAGE_STRATEGY_OPTIONS.some((x) => x.value === s.image_strategy)
+      ) {
+        next.image_strategy = s.image_strategy as JobImageStrategy
+      }
+      return next
+    })
   }
 
-  const onResuggestOptions = (data: Record<string, unknown>) => {
-    // 只填 5 字段，不动 core_topic
-    applySuggestedOptions(data.suggested_options)
-  }
-  const onGenerateOutline = (data: Record<string, unknown>) => {
-    const lines = data.outline
-    if (Array.isArray(lines) && lines.length > 0) {
-      setOutlineText(lines.map((s) => String(s).trim()).filter(Boolean).join('\n'))
+  const onAutoFill = async () => {
+    if (autoFilling) return
+    // 启用条件：主题模式需 core_topic 非空；文档模式需至少 1 个文件
+    if (mode === 'topic' && !coreTopic.trim()) return
+    if (mode === 'document' && files.length === 0) return
+
+    setAutoFilling(true)
+    try {
+      const m = await getDefaultModelInfo()
+      if (!m.configured) {
+        notifyError(m.message || '未配置默认模型，请到 管理后台 → 应用设置 配置')
+        return
+      }
+
+      const fd = new FormData()
+      fd.append('mode', mode)
+      fd.append('scenario', options.scenario)
+      fd.append('audience', options.audience)
+      fd.append('tone', options.tone)
+      fd.append('language', options.language)
+      if (mode === 'topic') {
+        fd.append('core_topic', coreTopic.trim())
+      } else {
+        for (const f of files) fd.append('files', f, f.name)
+      }
+
+      const resp = (await api('POST', '/api/app/llm/auto-fill', fd)) as Record<string, unknown>
+
+      // 文档模式：写入自动提取的 core_topic（主题模式不动用户输入）
+      if (mode === 'document') {
+        const ct = (resp.core_topic as string | undefined)?.trim()
+        if (ct) setCoreTopic(ct)
+      }
+      const kp = resp.key_points
+      if (Array.isArray(kp) && kp.length > 0) {
+        setKeyPointsText(kp.map((x) => String(x).trim()).filter(Boolean).join('\n'))
+      }
+      const outline = resp.outline
+      if (Array.isArray(outline) && outline.length > 0) {
+        setOutlineText(outline.map((x) => String(x).trim()).filter(Boolean).join('\n'))
+      }
+      applySuggestedOptions(resp.suggested_options)
+      applyStyle(resp.style)
+
+      const modelUsed = (resp.model_used as ModelInfo | undefined) ?? m
+      notifySuccess(`智能填充完成（${modelUsed.name ?? '模型'}）`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // 解析后端 detail JSON（如 {"code":"document_unsupported","message":"..."}）
+      const match = msg.match(/\d+:\s*({.*})/s)
+      if (match) {
+        try {
+          const detail = JSON.parse(match[1])
+          notifyError(`智能填充失败：${detail.message ?? msg}`)
+          return
+        } catch {
+          /* fall through */
+        }
+      }
+      notifyError(`智能填充失败：${msg}`)
+    } finally {
+      setAutoFilling(false)
     }
   }
-  const onSuggestStyle = (data: Record<string, unknown>) => {
-    const list = data.suggestions
-    if (!Array.isArray(list) || list.length === 0) return
-    // 取第一条，自动应用
-    const first = list[0] as Record<string, unknown>
-    setOptions((o) => ({
-      ...o,
-      visual_style: (first.visual_style as JobVisualStyle) ?? o.visual_style,
-      color_mode: (first.color_mode as JobOptions['color_mode']) ?? o.color_mode,
-      brand_hex: (first.brand_hex as string | null) ?? o.brand_hex,
-      industry: (first.industry as JobOptions['industry']) ?? o.industry,
-      image_strategy: (first.image_strategy as JobOptions['image_strategy']) ?? o.image_strategy,
-    }))
-  }
+
+  // 智能填充按钮启用条件
+  const canAutoFill =
+    !autoFilling &&
+    (mode === 'topic' ? coreTopic.trim().length > 0 : files.length > 0)
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
@@ -235,56 +320,71 @@ export function NewJobPage() {
             ② 内容输入
           </h2>
 
+          {/* 模式切换 */}
+          <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-700">
+            {(['topic', 'document'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`rounded px-4 py-1.5 text-sm transition ${
+                  mode === m
+                    ? 'bg-gemini-600 text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                }`}
+              >
+                {m === 'topic' ? '主题输入' : '文档输入'}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400">
+            {mode === 'topic'
+              ? '输入一句话主题，AI 据此生成整套方案。'
+              : '上传文档作为素材，AI 解析文档后提炼主题并生成整套方案。'}
+          </p>
+
+          {/* 文档模式：上传区（必填种子） */}
+          {mode === 'document' && (
+            <FileUploadZone files={files} onChange={setFiles} />
+          )}
+
+          {/* 核心主题（两种模式都必填；文档模式下由智能填充自动写入，可改） */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs text-slate-500">
-                核心主题 <span className="text-rose-500">*</span>
-              </span>
-              <AiOptimizeButton
-                endpoint="optimize-prompt"
-                body={{
-                  core_topic: coreTopic.trim() || '(空)',
-                  scenario: options.scenario,
-                  audience: options.audience,
-                  tone: options.tone,
-                  language: options.language,
-                }}
-                label="优化描述"
-                onResult={onOptimizePrompt}
-                disabled={!coreTopic.trim()}
-              />
-            </div>
+            <span className="text-xs text-slate-500">
+              核心主题 <span className="text-rose-500">*</span>
+              {mode === 'document' && (
+                <span className="ml-1 text-slate-400">（可点下方智能填充自动提取，也可手动编辑）</span>
+              )}
+            </span>
             <textarea
               value={coreTopic}
               onChange={(e) => setCoreTopic(e.target.value)}
               rows={4}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
               placeholder="一句话描述这个 PPT 的主题。例：介绍我们的新产品 X，面向企业客户，核心是提升效率。"
             />
           </div>
 
-          <FileUploadZone files={files} onChange={setFiles} />
+          {/* 全局智能填充按钮 */}
+          <button
+            type="button"
+            onClick={onAutoFill}
+            disabled={!canAutoFill}
+            className="w-full rounded-md border border-gemini-300 bg-gemini-50 px-3 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-100 disabled:opacity-50 dark:border-gemini-700 dark:bg-gemini-950 dark:text-gemini-200 dark:hover:bg-gemini-900"
+          >
+            {autoFilling
+              ? '智能填充中…'
+              : mode === 'topic'
+                ? '✨ 智能填充（基于主题生成大纲 / 重点 / 设置 / 风格）'
+                : '✨ 智能填充（解析文档，生成主题 / 大纲 / 重点 / 设置 / 风格）'}
+          </button>
 
+          {/* 推荐设置（可手改，智能填充会写入） */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs text-slate-500">
-                推荐设置（语言 / 场景 / 受众 / 语调 / 页数）
-              </span>
-              <AiOptimizeButton
-                endpoint="optimize-prompt"
-                body={{
-                  core_topic: coreTopic.trim() || '(空)',
-                  scenario: options.scenario,
-                  audience: options.audience,
-                  tone: options.tone,
-                  language: options.language,
-                }}
-                label="重新推荐"
-                onResult={onResuggestOptions}
-                disabled={!coreTopic.trim()}
-              />
-            </div>
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+            <span className="text-xs text-slate-500">
+              推荐设置（语言 / 场景 / 受众 / 语调 / 页数）
+            </span>
+            <div className="mt-1 flex flex-wrap items-end gap-x-4 gap-y-2">
               <OptionSelect
                 label="语言"
                 options={LANGUAGE_OPTIONS}
@@ -332,32 +432,19 @@ export function NewJobPage() {
             </div>
           </div>
 
+          {/* 章节大纲 */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs text-slate-500">章节大纲（每行一个标题）</span>
-              <AiOptimizeButton
-                endpoint="generate-outline"
-                body={{
-                  core_topic: coreTopic.trim() || '(空)',
-                  page_count: options.page_count,
-                  scenario: options.scenario,
-                  audience: options.audience,
-                  language: options.language,
-                }}
-                label="生成大纲"
-                onResult={onGenerateOutline}
-                disabled={!coreTopic.trim()}
-              />
-            </div>
+            <span className="text-xs text-slate-500">章节大纲（每行一个标题）</span>
             <textarea
               value={outlineText}
               onChange={(e) => setOutlineText(e.target.value)}
               rows={5}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
+              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
               placeholder={'封面\n第一章 背景与挑战\n第二章 解决方案\n第三章 实施路径\n第四章 预期收益\n总结'}
             />
           </div>
 
+          {/* 重点强调 */}
           <div>
             <span className="text-xs text-slate-500">重点强调（每行一个要点）</span>
             <textarea
@@ -372,23 +459,9 @@ export function NewJobPage() {
 
         {/* ── ③ 设计偏好 ─────────────────────────────────────── */}
         <section className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              ③ 设计偏好
-            </h2>
-            <AiOptimizeButton
-              endpoint="suggest-style"
-              body={{
-                core_topic: coreTopic.trim() || '(空)',
-                scenario: options.scenario,
-                audience: options.audience,
-                tone: options.tone,
-              }}
-              label="推荐风格"
-              onResult={onSuggestStyle}
-              disabled={!coreTopic.trim()}
-            />
-          </div>
+          <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            ③ 设计偏好
+          </h2>
 
           <OptionSelect
             label="视觉风格"

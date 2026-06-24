@@ -383,3 +383,145 @@ def suggest_style(
             "rationale": str(s.get("rationale") or "").strip(),
         })
     return {"suggestions": norm}, info
+
+
+# ── 智能填充（合并接口）─────────────────────────────────
+
+SYSTEM_AUTOFILL_PROMPT = """你是 PPT 创作总策划。根据用户提供的「主题」或「文档内容」，一次性产出整套创作方案，供前端自动填充各字段。
+
+你必须在一次输出里给出以下全部内容：
+
+1. core_topic：一句话核心主题（仅当输入是文档时需要从文档提炼；输入是主题时原样回传、可微调措辞）。≤200 字，要能独立概括这个 deck 讲什么。
+
+2. key_points：3-6 条要重点传达的洞察/数据/卖点，每条一行。
+
+3. suggested_options（用户可改的 5 个默认设置）：
+   * language: zh / en / bilingual（首选 zh，除非内容明显是英文）
+   * scenario: general / proposal / product / training / popular_science / speech / project_report
+   * audience: general / executive / team / client / expert / student
+   * tone: professional / friendly / technical / academic / concise
+   * page_count: 3-30 整数（短介绍 5-7、综合汇报 8-12、培训 12-20、长篇综述 20+）
+
+4. outline：章节大纲，条数尽量接近 page_count（含封面与结尾）。每条一行，开头用「第N章」或破折号，标题要具体、有递进，禁用「引言/概述/总结」这类万能词。
+
+5. style（视觉设计推荐，只给一组首选）：
+   * visual_style: auto / swiss-minimal / glassmorphism / dark-tech / brutalist / editorial / blueprint / photo-editorial / soft-rounded / data-journalism / memphis
+   * color_mode: auto / brand / industry（brand 时给 brand_hex；industry 时给 industry）
+   * brand_hex: #RRGGBB（仅 color_mode=brand 时填，否则 null）
+   * industry: finance / technology / healthcare / government / education / retail / creative（仅 color_mode=industry 时填，否则 null）
+   * image_strategy: ai / web / provided / placeholder / none（默认首选 web；除非用户明确要 AI 创作插图，否则不要选 ai）
+
+仅输出 JSON，结构固定如下，不要 markdown 围栏、不要解释、不要寒暄：
+{
+  "core_topic": "...",
+  "key_points": ["...", "..."],
+  "suggested_options": {"language": "...", "scenario": "...", "audience": "...", "tone": "...", "page_count": <int>},
+  "outline": ["第1章 ...", "第2章 ..."],
+  "style": {"visual_style": "...", "color_mode": "...", "brand_hex": "...", "industry": "...", "image_strategy": "..."}
+}"""
+
+_VALID_VISUAL_STYLES = {
+    "auto", "swiss-minimal", "glassmorphism", "dark-tech", "brutalist",
+    "editorial", "blueprint", "photo-editorial", "soft-rounded",
+    "data-journalism", "memphis",
+}
+_VALID_COLOR_MODES = {"auto", "brand", "industry"}
+_VALID_IMAGE_STRATEGIES = {"ai", "web", "provided", "placeholder", "none"}
+_VALID_INDUSTRIES = {
+    "finance", "technology", "healthcare", "government",
+    "education", "retail", "creative",
+}
+
+
+def _norm_style(raw: Any) -> dict:
+    """规范 style 字段：枚举校验 + brand_hex/industry 与 color_mode 联动。"""
+    if not isinstance(raw, dict):
+        raw = {}
+    color_mode = _pick_enum(raw.get("color_mode"), _VALID_COLOR_MODES, "auto")
+    brand_hex = raw.get("brand_hex") if color_mode == "brand" else None
+    if not isinstance(brand_hex, str):
+        brand_hex = None
+    industry = _pick_enum(
+        raw.get("industry"), _VALID_INDUSTRIES, "technology"
+    ) if color_mode == "industry" else None
+    return {
+        "visual_style": _pick_enum(raw.get("visual_style"), _VALID_VISUAL_STYLES, "auto"),
+        "color_mode": color_mode,
+        "brand_hex": brand_hex,
+        "industry": industry,
+        "image_strategy": _pick_enum(
+            raw.get("image_strategy"), _VALID_IMAGE_STRATEGIES, "web"
+        ),
+    }
+
+
+def auto_fill(
+    *,
+    seed: str,
+    is_document: bool,
+    scenario: str = "general",
+    audience: str = "general",
+    tone: str = "professional",
+    language: str = "zh",
+) -> tuple[dict, dict]:
+    """智能填充：单次 LLM 调用产出整套方案。
+
+    seed: 主题模式下是用户输入的主题文本；文档模式下是提取出的文档 markdown。
+    is_document: True=文档模式（需从 seed 提炼 core_topic），False=主题模式。
+    返回 {core_topic?, key_points, suggested_options, outline, style}，其中
+    core_topic 仅文档模式返回（主题模式不动用户输入）。
+    """
+    if is_document:
+        user = (
+            f"以下是用户上传的文档内容（已转为 markdown，可能截断）：\n\n"
+            f"{seed}\n\n"
+            f"请基于文档内容提炼核心主题并产出整套方案。"
+        )
+    else:
+        user = (
+            f"主题：{seed}\n"
+            f"场景：{scenario}\n受众：{audience}\n语调：{tone}\n语言：{language}\n\n"
+            f"请基于该主题产出整套方案。core_topic 可在原主题基础上微调措辞。"
+        )
+
+    parsed, info = chat_json(SYSTEM_AUTOFILL_PROMPT, user, max_tokens=3000)
+
+    key_points = parsed.get("key_points") or []
+    if not isinstance(key_points, list):
+        key_points = []
+    key_points = [str(x).strip() for x in key_points if str(x).strip()][:8]
+
+    suggested_raw = parsed.get("suggested_options") or {}
+    if not isinstance(suggested_raw, dict):
+        suggested_raw = {}
+    suggested_options = {
+        "language": _pick_enum(suggested_raw.get("language"), _VALID_LANGUAGES, language),
+        "scenario": _pick_enum(suggested_raw.get("scenario"), _VALID_SCENARIOS, scenario),
+        "audience": _pick_enum(suggested_raw.get("audience"), _VALID_AUDIENCES, audience),
+        "tone": _pick_enum(suggested_raw.get("tone"), _VALID_TONES, tone),
+        "page_count": _pick_int(suggested_raw.get("page_count"), 3, 30, 5),
+    }
+
+    outline = parsed.get("outline") or []
+    if not isinstance(outline, list):
+        outline = []
+    outline = [str(x).strip() for x in outline if str(x).strip()]
+    # 上限：page_count + 封面/结尾余量
+    outline = outline[: suggested_options["page_count"] + 2]
+
+    style = _norm_style(parsed.get("style"))
+
+    result: dict = {
+        "key_points": key_points,
+        "suggested_options": suggested_options,
+        "outline": outline,
+        "style": style,
+    }
+
+    # 文档模式：返回提炼出的 core_topic；主题模式：不返回，前端保持用户输入
+    if is_document:
+        core_topic = parsed.get("core_topic")
+        if isinstance(core_topic, str) and core_topic.strip():
+            result["core_topic"] = core_topic.strip()[:200]
+
+    return result, info
