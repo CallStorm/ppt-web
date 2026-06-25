@@ -74,6 +74,42 @@ export function fmtDuration(ms: number): string {
   return remMin > 0 ? `${hr} 小时 ${remMin} 分` : `${hr} 小时`
 }
 
+const FAST_FAIL_MS = 5000
+
+/** Duration segment for job card meta line (handles failed 0s → 未完成). */
+export function fmtJobMetaLine(
+  job: {
+    status: string
+    created_at: string | null
+    updated_at?: string | null
+    options?: { page_count?: number } | null
+  },
+  now: Date = new Date(),
+): string {
+  const dateText = fmtDateTime(job.created_at)
+  const elapsedMs = jobElapsedMs(job, now)
+  const isActive = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
+  const isFailedOrCancelled = job.status === 'failed' || job.status === 'cancelled'
+
+  let durationLabel: string
+  if (isFailedOrCancelled && (elapsedMs == null || elapsedMs < FAST_FAIL_MS)) {
+    durationLabel = '未完成'
+  } else if (elapsedMs == null) {
+    durationLabel = '—'
+  } else {
+    durationLabel = fmtDuration(elapsedMs)
+  }
+
+  const prefix = isActive ? '已用时' : isFailedOrCancelled && durationLabel === '未完成' ? '' : '耗时'
+  const pageCount = job.options?.page_count
+  const pagePart = pageCount != null ? ` · ${pageCount} 页` : ''
+
+  if (prefix) {
+    return `${dateText} · ${prefix} ${durationLabel}${pagePart}`
+  }
+  return `${dateText} · ${durationLabel}${pagePart}`
+}
+
 export function fmtCost(usd: number | null | undefined): string {
   if (usd == null) return '—'
   return `$${Number(usd).toFixed(3)}`

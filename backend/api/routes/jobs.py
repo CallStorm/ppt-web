@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -174,16 +174,26 @@ async def create_job(
 
 
 @router.get("")
-async def list_jobs(user: CurrentUser, limit: int = 50) -> dict:
+async def list_jobs(
+    user: CurrentUser,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict:
     with SessionLocal() as s:
+        query = s.query(Job).filter(Job.user_id == user.id)
+        total = query.count()
         rows = (
-            s.query(Job)
-            .filter(Job.user_id == user.id)
-            .order_by(Job.updated_at.desc())
+            query.order_by(Job.updated_at.desc())
+            .offset(offset)
             .limit(limit)
             .all()
         )
-    return {"jobs": [job_to_dict(j) for j in rows]}
+    return {
+        "jobs": [job_to_dict(j) for j in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{job_id}")

@@ -47,6 +47,9 @@ export interface Job {
 
 export interface JobListResponse {
   jobs: Job[]
+  total?: number
+  limit?: number
+  offset?: number
 }
 
 export interface Slide {

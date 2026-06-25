@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { notifyError, notifySuccess } from '../stores/toastStore'
-import { JOBS_KEY } from '../hooks/useJobs'
+import { invalidateJobLists } from '../hooks/useJobs'
 import { FileUploadZone } from '../components/jobs/FileUploadZone'
 import { VisualStyleChips } from '../components/jobs/VisualStyleChips'
 import { ColorPaletteStrip } from '../components/jobs/ColorPaletteStrip'
@@ -147,7 +147,7 @@ export function NewJobPage() {
       const job = await api<{ id: string }>('POST', '/api/jobs', fd)
       notifySuccess('任务已创建，排队中…')
       invalidateDefaultModelCache()
-      await qc.invalidateQueries({ queryKey: JOBS_KEY })
+      invalidateJobLists(qc)
       navigate(`/jobs/${job.id}`)
     } catch (e) {
       notifyError('创建失败: ' + (e instanceof Error ? e.message : String(e)))

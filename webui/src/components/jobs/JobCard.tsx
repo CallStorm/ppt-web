@@ -9,9 +9,15 @@ import { SlidePreviewModal } from './SlidePreviewModal'
 import { confirmDialog } from '../../stores/modalStore'
 import { useDeleteJob, useRetryJob } from '../../hooks/useJobs'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
-import { fmtDateTime, fmtDuration, jobElapsedMs } from '../../lib/format'
+import { fmtJobMetaLine, truncate } from '../../lib/format'
 
-export function JobCard({ job }: { job: Job }) {
+export function JobCard({
+  job,
+  sharedErrorCount = 0,
+}: {
+  job: Job
+  sharedErrorCount?: number
+}) {
   const hasPptx = !!job.pptx_path
   const isDone = job.status === 'done'
   const showDownload = isDone && hasPptx
@@ -23,10 +29,6 @@ export function JobCard({ job }: { job: Job }) {
   const [previewOpen, setPreviewOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // previewOk is derived from props + a local failure flag set on <img> onError;
-  // no syncing effect, so no react-hooks/set-state-in-effect advisory.
-  // previewFailed resets naturally on job change because the parent renders
-  // <JobCard key={job.id} ...>, remounting the component per job.
   const previewOk = !!job.has_preview && isDone && !previewFailed
 
   useEffect(() => {
@@ -53,14 +55,13 @@ export function JobCard({ job }: { job: Job }) {
 
   const handlePreview = (e: React.MouseEvent) => {
     stop(e)
+    setMenuOpen(false)
     setPreviewOpen(true)
   }
 
   const handleRetry = async (e: React.MouseEvent) => {
     stop(e)
     setMenuOpen(false)
-    // No success toast — the card's own status change (queued→running) is the
-    // feedback, per spec §4 (option #1). Only surface failures.
     try {
       await retryJob.mutateAsync(job.id)
     } catch (err) {
@@ -91,21 +92,19 @@ export function JobCard({ job }: { job: Job }) {
     }
   }
 
-  // Failed/cancelled error line (single, truncated).
   const errText =
     job.status === 'cancelled'
       ? '用户取消'
       : job.error_message?.trim()
   const showErr = (job.status === 'failed' || job.status === 'cancelled') && !!errText
 
-  const dateText = fmtDateTime(job.created_at)
-  const elapsedMs = jobElapsedMs(job)
-  const durationPrefix =
-    job.status === 'done' || job.status === 'failed' || job.status === 'cancelled'
-      ? '耗时'
-      : '已用时'
-  const durationText = elapsedMs == null ? '—' : fmtDuration(elapsedMs)
-  const metaText = `${dateText} · ${durationPrefix} ${durationText}`
+  const displayErr =
+    showErr && sharedErrorCount >= 2 && job.status === 'failed'
+      ? `相同错误（共 ${sharedErrorCount} 个作品）`
+      : errText
+
+  const metaText = fmtJobMetaLine(job)
+  const promptSummary = truncate(job.prompt, 36)
 
   return (
     <article
@@ -128,7 +127,6 @@ export function JobCard({ job }: { job: Job }) {
             <CoverPlaceholder status={job.status} id={job.id} />
           )}
 
-          {/* Hover action chip (top-right). Fades in on group-hover. */}
           {(isDone || canRetry) && (
             <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-full bg-white/85 px-1.5 py-1 opacity-0 shadow-sm backdrop-blur transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 dark:bg-slate-900/85">
               {isDone && (
@@ -191,6 +189,21 @@ export function JobCard({ job }: { job: Job }) {
               )}
             </div>
           )}
+
+          {canRetry && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={retryJob.isPending}
+              className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-gemini-700 shadow-sm backdrop-blur hover:bg-white disabled:opacity-50 dark:bg-slate-900/90 dark:text-gemini-300"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+              重试
+            </button>
+          )}
         </div>
       </Link>
 
@@ -203,60 +216,100 @@ export function JobCard({ job }: { job: Job }) {
           >
             {job.project_name || '(未命名)'}
           </Link>
+          <StatusPill status={job.status} />
+        </div>
 
-          <div className="flex shrink-0 items-center gap-1">
-            <StatusPill status={job.status} />
-            <QueueBadge position={job.queue_position} />
-
-            <div className="relative" ref={menuRef}>
-              <button
-                type="button"
-                onClick={handleMenuToggle}
-                className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-                aria-label="更多操作"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="5" cy="12" r="2" />
-                  <circle cx="12" cy="12" r="2" />
-                  <circle cx="19" cy="12" r="2" />
-                </svg>
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 bottom-full z-50 mb-1 min-w-[88px] rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                  {canRetry && (
-                    <button
-                      type="button"
-                      onClick={handleRetry}
-                      disabled={retryJob.isPending}
-                      className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                    >
-                      重试
-                    </button>
-                  )}
+        <div className="mt-1 flex items-center gap-2">
+          <p
+            className="min-w-0 flex-1 truncate text-xs text-slate-400 dark:text-slate-500"
+            title={metaText}
+          >
+            {metaText}
+          </p>
+          <QueueBadge position={job.queue_position} />
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              onClick={handleMenuToggle}
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+              aria-label="更多操作"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="5" cy="12" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="19" cy="12" r="2" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                {isDone && (
                   <button
                     type="button"
-                    onClick={handleDelete}
-                    disabled={deleteJob.isPending}
-                    className="block w-full px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:hover:bg-rose-900/20"
+                    onClick={handlePreview}
+                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
-                    删除
+                    预览
                   </button>
-                </div>
-              )}
-            </div>
+                )}
+                {showDownload && (
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    下载 PPTX
+                  </button>
+                )}
+                {isDone && hasPptx && (
+                  <Link
+                    to={`/jobs/${job.id}/edit`}
+                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMenuOpen(false)
+                    }}
+                  >
+                    编辑修改
+                  </Link>
+                )}
+                {canRetry && (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    disabled={retryJob.isPending}
+                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    重试
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleteJob.isPending}
+                  className="block w-full px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:hover:bg-rose-900/20"
+                >
+                  删除
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
-        <p
-          className="mt-1 text-xs text-slate-400 dark:text-slate-500"
-          title={metaText}
-        >
-          {metaText}
-        </p>
+        {promptSummary && (
+          <p
+            className="mt-1 truncate text-xs text-slate-400/90 dark:text-slate-500"
+            title={job.prompt}
+          >
+            {promptSummary}
+          </p>
+        )}
 
         {showErr && (
-          <p className="mt-1 truncate text-xs text-rose-500/80 dark:text-rose-400/80" title={errText}>
-            {errText}
+          <p
+            className="mt-1 truncate text-xs text-rose-500/80 dark:text-rose-400/80"
+            title={errText}
+          >
+            {displayErr}
           </p>
         )}
       </div>
