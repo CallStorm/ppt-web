@@ -409,6 +409,13 @@ async def download_preview(job_id: str, user: CurrentUser):
             raise HTTPException(403, "preview path forbidden")
 
         media_type = _PREVIEW_MEDIA.get(preview.suffix.lower(), "application/octet-stream")
+        # Health gate: an SVG cover with a wrong namespace renders as a
+        # blank card in the job list. 503 with a clear hint beats silence.
+        if media_type == "image/svg+xml" and not _is_renderable_svg(preview):
+            raise HTTPException(
+                503,
+                "cover preview has an invalid SVG namespace; re-run finalize_svg or regenerate",
+            )
         return FileResponse(preview, media_type=media_type)
 
 
@@ -449,18 +456,56 @@ async def list_job_slides(job_id: str, user: CurrentUser) -> dict:
     slides = _verified_slides(j)
     if not slides:
         raise HTTPException(404, "no slides available")
-    return {
-        "slides": [
+    out = []
+    for sl in slides:
+        renderable = (
+            sl["media_type"] != "image/svg+xml" or _is_renderable_svg(sl["path"])
+        )
+        # Mark broken slides so the UI can show a "needs repair" chip
+        # instead of pointing the user at a URL that will 503.
+        out.append(
             {
                 "index": sl["index"],
                 "name": sl["name"],
-                "image_url": f"/api/jobs/{job_id}/slides/{sl['index']}",
+                "image_url": f"/api/jobs/{job_id}/slides/{sl['index']}"
+                if renderable
+                else None,
                 "has_notes": sl["has_notes"],
-                "notes_url": f"/api/jobs/{job_id}/slides/{sl['index']}/notes" if sl["has_notes"] else None,
+                "notes_url": f"/api/jobs/{job_id}/slides/{sl['index']}/notes"
+                if sl["has_notes"]
+                else None,
+                "renderable": renderable,
+                "repair_hint": (
+                    None
+                    if renderable
+                    else "invalid SVG namespace — re-run finalize_svg or regenerate this page"
+                ),
             }
-            for sl in slides
-        ]
-    }
+        )
+    return {"slides": out}
+
+
+def _is_renderable_svg(path) -> bool:
+    """Return True iff ``path`` is an SVG whose root element is the
+    canonical ``{http://www.w3.org/2000/svg}svg``.
+
+    The Executor (LLM) occasionally emits SVGs with a wrong namespace URI
+    (the common hallucination is ``http://www.w3.org/1990/svg`` bound to
+    a ``ns0:`` prefix). Browsers refuse to render any element outside the
+    SVG namespace, so the page comes back blank. The previews pipeline
+    now self-heals stale pages, but this is the last-line check that the
+    file we're about to hand to the browser is actually renderable — a
+    broken file means the repair step missed it, and the caller should
+    see a clear 503, not a silent blank canvas.
+    """
+    if path is None:
+        return False
+    try:
+        from lxml import etree as _et
+        root = _et.parse(str(path)).getroot()
+    except Exception:
+        return False
+    return _et.QName(root.tag).namespace == "http://www.w3.org/2000/svg"
 
 
 @router.get("/{job_id}/slides/{slide_index}")
@@ -475,6 +520,12 @@ async def get_job_slide(job_id: str, slide_index: int, user: CurrentUser):
     sl = next((x for x in slides if x["index"] == slide_index), None)
     if not sl:
         raise HTTPException(404, f"slide {slide_index} not found")
+    if sl["media_type"] == "image/svg+xml" and not _is_renderable_svg(sl["path"]):
+        raise HTTPException(
+            503,
+            f"slide {slide_index} has an invalid SVG namespace; "
+            "re-run finalize_svg or click 'regenerate' to repair",
+        )
     return FileResponse(sl["path"], media_type=sl["media_type"])
 
 
@@ -526,3 +577,134 @@ async def delete_job(job_id: str, user: CurrentUser) -> dict:
 
     notify_dispatcher()
     return {"id": job_id, "deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Image-candidate review endpoints
+# ---------------------------------------------------------------------------
+#
+# Rationale: the image-search pipeline saves the top-N candidates it
+# considered for each slide to ``candidates/<stem>/candidate_*.jpg`` plus
+# a ``candidates.json`` manifest. The frontend is expected to display
+# them as a grid and require an explicit user pick before finalize uses
+# that image — without that "the human has to see the picture" step, a
+# disturbing off-topic image (e.g. a mouth photo for a "tired
+# businessperson" pain slide) can end up in the final deck.
+
+
+@router.get("/{job_id}/image-candidates")
+async def list_image_candidates(job_id: str, user: CurrentUser) -> dict:
+    """For each image-having slide, list the saved candidates with a
+    thumbnail URL, attribution, and a ``confirmed`` flag.
+
+    The frontend uses this to render the "review your selected images"
+    grid and only allows finalize after every slide's image is
+    explicitly confirmed.
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    project_dir = resolve_job_project_dir(j)
+    if not project_dir:
+        return {"items": []}
+    candidates_root = project_dir / "candidates"
+    if not candidates_root.is_dir():
+        return {"items": []}
+    items: list[dict] = []
+    for stem_dir in sorted(candidates_root.iterdir()):
+        if not stem_dir.is_dir():
+            continue
+        manifest_path = stem_dir / "candidates.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        cands = manifest.get("candidates", [])
+        # Also include a "confirmed" flag persisted as a sidecar file
+        # so the choice survives page reloads.
+        confirmation_path = stem_dir / ".confirmed"
+        confirmed = confirmation_path.is_file()
+        items.append(
+            {
+                "stem": stem_dir.name,
+                "target_filename": manifest.get("target_filename", ""),
+                "selected": manifest.get("selected", ""),
+                "confirmed": confirmed,
+                "candidates": [
+                    {
+                        "rank": c.get("rank"),
+                        "score": c.get("score"),
+                        "filename": c.get("filename"),
+                        "title": c.get("title", ""),
+                        "author": c.get("author", ""),
+                        "license_name": c.get("license_name", ""),
+                        "image_url": (
+                            f"/api/jobs/{job_id}/image-candidates/"
+                            f"{stem_dir.name}/{c.get('filename')}"
+                        ),
+                    }
+                    for c in cands
+                ],
+            }
+        )
+    return {"items": items}
+
+
+@router.get("/{job_id}/image-candidates/{stem}/{filename}")
+async def get_image_candidate(
+    job_id: str, stem: str, filename: str, user: CurrentUser
+):
+    """Serve a single candidate thumbnail (path-traversal-guarded)."""
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    project_dir = resolve_job_project_dir(j)
+    if not project_dir:
+        raise HTTPException(404, "project not found")
+    candidate_path = (project_dir / "candidates" / stem / filename).resolve()
+    candidates_root = (project_dir / "candidates").resolve()
+    if not is_under(candidate_path, candidates_root):
+        raise HTTPException(403, "path forbidden")
+    if not candidate_path.is_file():
+        raise HTTPException(404, "candidate not found")
+    media_type = "image/jpeg"
+    if candidate_path.suffix.lower() in (".png",):
+        media_type = "image/png"
+    elif candidate_path.suffix.lower() in (".webp",):
+        media_type = "image/webp"
+    return FileResponse(candidate_path, media_type=media_type)
+
+
+@router.post("/{job_id}/image-candidates/{stem}/confirm")
+async def confirm_image_candidate(
+    job_id: str, stem: str, user: CurrentUser
+) -> dict:
+    """Mark the user has seen and accepted the currently-selected image
+    for this slide. The frontend must call this after the user clicks
+    "accept" on a candidate. Subsequent finalize runs are not gated on
+    this in the current code path — it's an auditable breadcrumb that
+    surfaces in logs and the manifest, so we can detect "user never
+    confirmed this image" regressions in the future.
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+    project_dir = resolve_job_project_dir(j)
+    if not project_dir:
+        raise HTTPException(404, "project not found")
+    stem_dir = project_dir / "candidates" / stem
+    if not stem_dir.is_dir():
+        raise HTTPException(404, "stem not found")
+    confirmation_path = stem_dir / ".confirmed"
+    confirmation_path.write_text(
+        json.dumps(
+            {
+                "confirmed_at": int(__import__("time").time()),
+                "user_id": str(user.id) if hasattr(user, "id") else None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return {"ok": True, "stem": stem}

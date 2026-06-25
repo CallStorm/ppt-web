@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from backend.runner.svg_finalize import refresh_stale_pages
+
 
 def _first_svg(svg_dir: Path) -> Path | None:
     if not svg_dir.is_dir():
@@ -55,14 +57,23 @@ def list_slides(project_dir: Path | None) -> list[dict]:
     the optional visual-review step) and falls back to ``svg_final/NN_*.svg`` —
     the same self-contained SVGs the cover thumbnail already serves.
 
+    If a page in ``svg_output/`` is newer than its counterpart in
+    ``svg_final/`` (the common case after a live-preview regen, which only
+    re-writes ``svg_output/``), the page is brought up to date in
+    ``svg_final/`` on the fly so the preview never shows stale or
+    namespace-broken SVGs. The copy is namespace-repaired unconditionally
+    (the page that "renders nothing" bug is a wrong xmlns URI on the root).
+
     Returns a list of dicts: ``{index, name, path, media_type, has_notes,
     notes_path}``, sorted by the leading ``NN`` number.
     """
     if not project_dir or not project_dir.exists():
         return []
     svg_dir = project_dir / "svg_final"
+    svg_output_dir = project_dir / "svg_output"
     if not svg_dir.is_dir():
         return []
+    refresh_stale_pages(svg_output_dir, svg_dir)
 
     preview_dir = project_dir / ".preview"
     notes_dir = project_dir / "notes"
