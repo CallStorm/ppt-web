@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { api, downloadUrl } from '../api/client'
-import type { SseEvent } from '../api/types'
+import type { RevisionsListResponse, SseEvent } from '../api/types'
 import { useJob } from '../hooks/useJobs'
 import { useJobEvents } from '../hooks/useJobEvents'
 import { StatusPill } from '../components/jobs/StatusPill'
@@ -68,6 +69,19 @@ export function JobDetailPage() {
   const hasPptx = !!job?.pptx_path
   const isPaused = job?.status === 'paused'
   const isActive = job && ['running', 'queued', 'paused'].includes(job.status)
+
+  // Version chain (this job + any later revisions). Used to (a) make the
+  // download button default to the latest done revision and (b) render a
+  // compact history list. Returns [] for jobs that have no children.
+  const revisionsQ = useQuery({
+    queryKey: ['job', id, 'revisions'],
+    queryFn: () =>
+      api<RevisionsListResponse>('GET', `/api/jobs/${id}/revisions`),
+    enabled: !!id,
+    refetchInterval: 10_000, // catch in-progress revisions as they complete
+  })
+  const revisions = revisionsQ.data?.items ?? []
+  const latestDone = revisions.find((r) => r.is_latest && r.status === 'done')
 
   const currentStageIdx = useMemo(() => {
     if (!stage) return -1
@@ -152,8 +166,15 @@ export function JobDetailPage() {
   }
 
   const doDownload = () => {
-    if (!hasPptx || !id) return
-    downloadUrl(`/api/jobs/${id}/pptx`, `${job?.project_name || id}.pptx`)
+    if (!id) return
+    // The latest entry in the revision chain is what the user really wants;
+    // fall back to this job's own pptx if the chain hasn't loaded yet.
+    if (!latestDone && !hasPptx) return
+    const targetId = latestDone ? latestDone.job_id : id
+    const filename = latestDone
+      ? `${job?.project_name || id}-${targetId.slice(0, 6)}.pptx`
+      : `${job?.project_name || id}.pptx`
+    downloadUrl(`/api/jobs/${targetId}/pptx`, filename)
   }
 
   const copyRaw = async () => {
@@ -223,8 +244,16 @@ export function JobDetailPage() {
               onClick={doDownload}
               className="rounded-md bg-gemini-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-gemini-700"
             >
-              下载 PPTX
+              {latestDone ? '下载最新 PPTX' : '下载 PPTX'}
             </button>
+          )}
+          {hasPptx && (
+            <Link
+              to={`/jobs/${id}/edit`}
+              className="rounded-md border border-gemini-200 px-3 py-1.5 text-sm text-gemini-700 hover:bg-gemini-50 dark:border-gemini-700 dark:text-gemini-300 dark:hover:bg-gemini-900/30"
+            >
+              编辑修改
+            </Link>
           )}
         </div>
       </div>
@@ -322,6 +351,80 @@ export function JobDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {tab === 'overview' && (
+        <section className="mt-6">
+          <h3 className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+            版本历史
+          </h3>
+          {revisionsQ.isLoading ? (
+            <p className="text-xs text-slate-400">加载中…</p>
+          ) : revisions.length === 0 ? (
+            <p className="text-xs text-slate-400">暂无</p>
+          ) : (
+            <ol className="space-y-2">
+              {revisions.map((r) => (
+                <li
+                  key={r.job_id}
+                  className={`flex items-center justify-between gap-3 rounded border px-3 py-2 text-sm ${
+                    r.is_latest
+                      ? 'border-gemini-300 bg-gemini-50/50 dark:border-gemini-700 dark:bg-gemini-900/20'
+                      : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/jobs/${r.job_id}`}
+                        className="truncate font-mono text-xs text-slate-600 hover:underline dark:text-slate-300"
+                      >
+                        {r.job_id.slice(0, 8)}…
+                      </Link>
+                      {r.is_self && (
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                          原版
+                        </span>
+                      )}
+                      {r.is_latest && (
+                        <span className="rounded bg-gemini-200 px-1.5 py-0.5 text-[10px] text-gemini-800 dark:bg-gemini-800 dark:text-gemini-200">
+                          最新
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-500">{r.status}</span>
+                    </div>
+                    {r.comments.length > 0 && (
+                      <ul className="mt-1 list-disc pl-5 text-xs text-slate-500 dark:text-slate-400">
+                        {r.comments.slice(0, 3).map((c, i) => (
+                          <li key={i} className="truncate">
+                            <span className="font-mono">#{c.slide_index}</span> {c.comment}
+                          </li>
+                        ))}
+                        {r.comments.length > 3 && (
+                          <li className="text-slate-400">… 还有 {r.comments.length - 3} 条</li>
+                        )}
+                      </ul>
+                    )}
+                    {r.created_at && (
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        {fmtDateTime(r.created_at)}
+                      </p>
+                    )}
+                  </div>
+                  {r.status === 'done' && r.pptx_url && (
+                    <button
+                      type="button"
+                      onClick={() => downloadUrl(r.pptx_url!, `${r.job_id.slice(0, 8)}.pptx`)}
+                      className="shrink-0 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      下载
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
       )}
 
       {tab === 'raw' && (

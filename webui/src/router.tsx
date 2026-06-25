@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { NewJobPage } from './pages/NewJobPage'
 import { JobDetailPage } from './pages/JobDetailPage'
+import { EditJobPage } from './pages/EditJobPage'
 import { AdminPage } from './pages/AdminPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,7 @@ export function AppRoutes() {
         <Route index element={<DashboardPage />} />
         <Route path="jobs/new" element={<NewJobPage />} />
         <Route path="jobs/:id" element={<JobDetailPage />} />
+        <Route path="jobs/:id/edit" element={<EditJobPage />} />
         <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

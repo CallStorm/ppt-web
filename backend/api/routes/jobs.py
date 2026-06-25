@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.api.deps import (
     get_job_or_404,
@@ -16,7 +16,7 @@ from backend.api.deps import (
     require_owner_or_admin,
     resolve_job_project_dir,
 )
-from backend.api.schemas.job_options import job_options_from_form
+from backend.api.schemas.job_options import RevisionItem, job_options_from_form
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
@@ -707,4 +707,204 @@ async def confirm_image_candidate(
         ),
         encoding="utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# Revisions (post-completion modifications)
+# ---------------------------------------------------------------------------
+#
+# See backend/runtime/revisions.py for the queueing pipeline and the
+# prompt template. The route handlers below are thin shims over it —
+# every error case returns a clear message the frontend can surface
+# verbatim to the user.
+
+
+class _RevisionBody(BaseModel):
+    items: list[RevisionItem] = Field(
+        min_length=1,
+        max_length=50,
+        description="Per-slide modification comments (1..50).",
+    )
+
+
+@router.get("/{job_id}/edit-targets")
+async def get_edit_targets(job_id: str, user: CurrentUser) -> dict:
+    """Return whether the job is editable, why/why-not, and the slide
+    grid the frontend will render inside the Edit modal.
+
+    The slide grid mirrors ``/slides`` so the UI can share the rendering
+    component. ``current_note`` is the slide's existing speaker notes
+    (if any) — useful as a hint to the user when writing a comment.
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+
+    out: dict = {
+        "editable": False,
+        "reason": None,
+        "session_id": j.session_id,
+        "pptx_path": j.pptx_path,
+        "project_dir": j.project_dir,
+        "slides": [],
+    }
+    if j.status != "done":
+        out["reason"] = (
+            f"job is not done (status={j.status}); only completed decks can be edited"
+        )
+        return out
+
+    # Verify project_dir is still on disk. This is the file the agent
+    # would edit; if it's gone, the user can't be helped.
+    if not j.project_dir or not Path(j.project_dir).is_dir():
+        out["reason"] = "source deck files are missing on disk; cannot edit"
+        return out
+
+    out["editable"] = True
+    if not j.session_id:
+        out["reason"] = (
+            "no session history (likely a server restart); revision will run "
+            "in degraded mode and may be less accurate"
+        )
+
+    slides = _verified_slides(j)
+    for sl in slides:
+        notes = ""
+        if sl.get("notes_path"):
+            try:
+                notes = sl["notes_path"].read_text(encoding="utf-8")[:500]
+            except OSError:
+                notes = ""
+        out["slides"].append(
+            {
+                "index": sl["index"],
+                "name": sl["name"],
+                "image_url": f"/api/jobs/{job_id}/slides/{sl['index']}",
+                "current_note": notes,
+            }
+        )
+    return out
+
+
+@router.post("/{job_id}/revisions", status_code=201)
+async def post_revision(
+    job_id: str, body: _RevisionBody, user: CurrentUser
+) -> dict:
+    """Submit per-slide modification comments. Creates a new revision
+    job, copies the source deck, and queues a ``claude --resume`` run.
+
+    Always deducts 1 credit (same as a fresh job). On failure during
+    filesystem copy the credit is refunded.
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+
+    # Validate items against actual slide count.
+    slides = _verified_slides(j)
+    if not slides:
+        raise HTTPException(400, "source job has no slides to edit")
+    max_idx = max(sl["index"] for sl in slides)
+    seen: set[int] = set()
+    for it in body.items:
+        if it.slide_index < 1 or it.slide_index > max_idx:
+            raise HTTPException(
+                400,
+                f"slide_index {it.slide_index} is out of range 1..{max_idx}",
+            )
+        if it.slide_index in seen:
+            raise HTTPException(
+                400, f"duplicate slide_index {it.slide_index} in items"
+            )
+        seen.add(it.slide_index)
+        if not it.comment.strip():
+            raise HTTPException(
+                400, f"slide {it.slide_index}: comment is empty"
+            )
+
+    # Build a slide_index -> name lookup for the prompt template.
+    slide_names = {sl["index"]: sl["name"] for sl in slides}
+
+    from backend.runtime.revisions import queue_revision, RevisionError
+    try:
+        new_job_id = queue_revision(
+            old_job_id=job_id,
+            items=body.items,
+            user_id=user.id,
+            slide_names=slide_names,
+        )
+    except RevisionError as e:
+        # Most user-visible failures are 4xx (not done, no credit, …);
+        # filesystem failures are 500-ish but we surface them as 400
+        # so the frontend shows a friendly message instead of a stack.
+        raise HTTPException(400, str(e)) from e
+    return {"revision_job_id": new_job_id, "status": "queued"}
+
+
+@router.get("/{job_id}/revisions")
+async def list_revisions(job_id: str, user: CurrentUser) -> dict:
+    """List this job's revision history.
+
+    Returns both the "v0" (this job) and any later revisions that point
+    back to it via ``revision_of_job_id``. Sorted newest-first; the
+    frontend uses the first item as the "latest" for download links.
+    """
+    with SessionLocal() as s:
+        j = get_job_or_404(s, job_id)
+        require_owner_or_admin(j, user)
+
+    revisions: list[dict] = []
+    children = (
+        s.query(Job)
+        .filter(Job.revision_of_job_id == job_id)
+        .order_by(Job.created_at.desc())
+        .all()
+    )
+
+    def _item(job_row: Job, *, is_self: bool) -> dict:
+        comments: list[dict] = []
+        try:
+            opts = json.loads(job_row.options_json) if job_row.options_json else {}
+            for it in (opts.get("revision_items") or []):
+                comments.append(
+                    {"slide_index": it.get("slide_index"), "comment": it.get("comment", "")}
+                )
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return {
+            "job_id": job_row.id,
+            "is_self": is_self,
+            "is_latest": False,  # filled in below
+            "status": job_row.status,
+            "created_at": job_row.created_at.isoformat() if job_row.created_at else None,
+            "pptx_url": (
+                f"/api/jobs/{job_row.id}/pptx" if job_row.status == "done" else None
+            ),
+            "preview_url": (
+                f"/api/jobs/{job_row.id}/preview" if job_row.status == "done" else None
+            ),
+            "comments": comments,
+        }
+
+    # If this job itself is a revision, the user wants the full chain.
+    # Surface the current job as the "self" entry. Children are
+    # already sorted newest-first (ORDER BY created_at DESC).
+    revisions.append(_item(j, is_self=True))
+    for c in children:
+        revisions.append(_item(c, is_self=False))
+
+    # Latest = the newest done child when there is one. If no child has
+    # finished, fall back to the newest child of any status. Only when
+    # there are no children at all do we point "latest" at the source
+    # job itself.
+    done_children = [r for r in revisions if not r["is_self"] and r["status"] == "done"]
+    if done_children:
+        latest = done_children[0]
+    elif children:
+        latest = revisions[1]  # children start at index 1 (right after self)
+    else:
+        latest = revisions[0]
+    latest["is_latest"] = True
+
+    return {"items": revisions}
     return {"ok": True, "stem": stem}

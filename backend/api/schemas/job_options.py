@@ -65,6 +65,18 @@ INDUSTRY_PRESETS = (
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
+class RevisionItem(BaseModel):
+    """One user comment on a single slide in a revision request.
+
+    The slide_index is 1-based and must match an actual slide in the
+    original deck. ``comment`` is a free-text instruction, max 1000
+    characters, that the agent will read verbatim.
+    """
+
+    slide_index: int = Field(ge=1, le=100)
+    comment: str = Field(min_length=1, max_length=1000)
+
+
 class JobOptions(BaseModel):
     # ── 现有（保持） ─────────────────────────────────────
     language: Language = "zh"
@@ -91,6 +103,14 @@ class JobOptions(BaseModel):
     include_speaker_notes: bool = True
     split_mode: bool = False
     glossary: dict[str, str] | None = None
+
+    # ── 修改（revisions） ────────────────────────────────
+    # 当本 job 是对另一个已完成 job 的修改版时，由 queue_revision 写入；
+    # 普通新建 job 此字段为 None。前端从 GET /jobs/{id}/revisions 取链。
+    revision_items: list[RevisionItem] | None = Field(
+        default=None,
+        description="Per-slide modification comments driving this revision job",
+    )
 
     def model_post_init(self, __context) -> None:  # type: ignore[override]
         if self.visual_style is not None and self.visual_style not in VISUAL_STYLES:

@@ -61,6 +61,51 @@ export interface JobSlidesResponse {
   slides: Slide[]
 }
 
+// ---------------------------------------------------------------------------
+// Revisions (post-completion modifications)
+// ---------------------------------------------------------------------------
+
+export interface EditTargetSlide {
+  index: number
+  name: string
+  image_url: string
+  current_note: string
+}
+
+export interface EditTargetsResponse {
+  editable: boolean
+  reason: string | null
+  session_id: string | null
+  pptx_path: string | null
+  project_dir: string | null
+  slides: EditTargetSlide[]
+}
+
+export interface RevisionItem {
+  slide_index: number
+  comment: string
+}
+
+export interface PostRevisionResponse {
+  revision_job_id: string
+  status: string
+}
+
+export interface RevisionEntry {
+  job_id: string
+  is_self: boolean
+  is_latest: boolean
+  status: JobStatus
+  created_at: string | null
+  pptx_url: string | null
+  preview_url: string | null
+  comments: RevisionItem[]
+}
+
+export interface RevisionsListResponse {
+  items: RevisionEntry[]
+}
+
 export interface SseEvent {
   type: string
   payload: Record<string, unknown>

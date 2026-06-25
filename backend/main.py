@@ -16,6 +16,7 @@ from backend.db.migrations import (
     migrate_v3_to_v4,
     migrate_v4_to_v5,
     migrate_v5_to_v6,
+    migrate_v6_to_v7,
 )
 from backend.db.session import init_db
 from backend.paths import DATA_DIR
@@ -45,6 +46,8 @@ async def lifespan(app: FastAPI):
         log.warning("backend migrate_v4_to_v5 done; added app_config + admin_action_logs")
     if migrate_v5_to_v6():
         log.warning("backend migrate_v5_to_v6 done; added jobs.options_json")
+    if migrate_v6_to_v7():
+        log.warning("backend migrate_v6_to_v7 done; added jobs.revision_of_job_id")
     init_db()
     seed_default_admin()
     DATA_DIR.mkdir(parents=True, exist_ok=True)

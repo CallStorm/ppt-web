@@ -119,6 +119,51 @@
 
 `POST /api/jobs/{id}/retry`（仅限 `failed` / `cancelled` 状态）原地重跑，**沿用原始 prompt + 选项**，不必重新填表。WebUI 在「我的作品」卡片底部、任务详情页顶部各提供一个「重试」入口；credits 不足时按钮 disabled。重试在数据层复用同一 job_id、events 表追加新阶段记录，旧失败原因保留在事件流中可回看。
 
+## 已完成任务的修改（Edit / Revisions）
+
+对 `status === 'done'` 的任务，可在 WebUI 卡片悬停时点「编辑」图标进入「修改」页（或访问 `/jobs/{id}/edit`）。在要改的页下面写意见、勾选确认后提交——后端会**新建一个 revision job**（`revision_of_job_id` 指向原任务），把原 deck 整个复制到 revision 的隔离目录，**扣 1 credit**，然后用 `claude --resume <原 session_id>` 把修改意见喂回去。
+
+![作品列表（已完成的 PPT 卡片）](./images/edit-01-dashboard.png)
+
+**编辑页**（`/jobs/{id}/edit`）：11 张缩略图 1×2 网格（移动端 1 列），每张下面一个 textarea，限 1000 字符。底部 sticky 底栏有"我已检查全部 N 张图"勾选 + "提交修改"按钮（无意见 / 未勾选 / 提交中均 disabled），并显示"将扣 1 个积分"提醒。
+
+![编辑页 — 11 张缩略图 + 每页意见框](./images/edit-02-edit-page.png)
+
+**任务详情**（原任务）新增"编辑修改"链接（与"下载"按钮并列）；"下载 PPTX"自动指向**最新**已完成的 revision，文件名带版本号后缀；底部"版本历史"区列出整条链，每条带「原版/最新」徽标、状态、提交时间、评论摘要，并可单独下载。
+
+![任务详情 — 版本历史区（最新版本标"最新"，原版仍可单独下载）](./images/revisions-03-job-detail.png)
+
+**最新版本身的详情**（上面的 0a963318… 就是 r2，是这个用户的第二次修改）：它自身是「原版 + 最新」（没有再下层的 revision），详情底部仍然展示版本历史。Agent 的 last_agent_text（"Now let me rewrite page_02_pain.svg ..."）也能直接看到，方便你确认它改对了页。
+
+![最新版详情 — 自带版本历史 + Agent 最后输出](./images/revisions-04-latest-revision.png)
+
+关键设计：
+
+- **新 job 独立**：revision 走自己的 status / events / cancel / pptx，UI 上像看一个全新任务一样看进度
+- **历史版本不限制**：每次修改留一个版本；详情页"版本历史"列出全部，可点开下载任意历史 pptx
+- **下载默认最新**：`/jobs/{id}/pptx` 在前端被"版本历史"逻辑改写为指向最新 `is_latest && status === 'done'` 的 revision
+- **session 不可用时降级**：若服务重启导致原 `session_id` 丢失，prompt 切到「无上下文」模板，提示 agent 读 `design_spec.md` + `svg_output/` 自助修改，**自动放行**（不需要用户额外确认）
+- **单轮**：本轮只跑一次；想再改就再次点"编辑"重新提交
+
+截图脚本：`scripts/screenshot_revisions.py`（用 Playwright，自动登录 admin、定位一个已存在 revision 链的 job 拍 4 张）。
+
+API 列表：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET`  | `/api/jobs/{id}/edit-targets`   | 取可编辑性 + 11 张幻灯图（含 `current_note`）|
+| `POST` | `/api/jobs/{id}/revisions`      | 提交 `{items: [{slide_index, comment}]}`；返回 `{revision_job_id, status}` |
+| `GET`  | `/api/jobs/{id}/revisions`      | 取本任务 + 后续 revisions 链（含 `is_latest` 标记）|
+
+后端实现：`backend/runtime/revisions.py`（`copy_project_dir` + `queue_revision` + prompt 模板）、`backend/api/routes/jobs.py`（3 个端点）、`backend/tests/test_revisions.py`（13 个单测）。
+
+## 渲染与选图稳定性（自动化安全网）
+
+近几轮加固了两条自动防线，避免"幻灯片空白 / 配图吓哭用户"等隐性失败：
+
+- **SVG 命名空间修复** — LLM 在生成 SVG 时偶尔会写出 `xmlns:ns0="http://www.w3.org/1990/svg"`（年份写错）之类的坏根命名空间，导致浏览器整页空白。`ppt-master/scripts/svg_finalize/repair_namespace.py` 在 `finalize_svg.py` 的最后一步无条件跑一遍，把所有指向 `*/YYYY/svg`（`YYYY != 2000`）的元素重打标签到正确命名空间；同时 `backend/runner/preview.py::list_slides` 在检测到 `svg_output/` 比 `svg_final/` 新时会**自动同步 + 修复**，所以单页重生成后预览永远自愈。后端在 `GET /api/jobs/{id}/slides`、`/slides/{i}`、`/preview` 三个端点加了 `lxml`-based `_is_renderable_svg` 闸，坏文件返回 `503` 而不是静默给空 SVG。
+- **图像安全过滤** — `image_safety.py` 在 `image_search.py` 流程里加了两层：查询净化（`tired → overworked` 等情感词替换为可视化概念）+ 关键词黑名单（`teeth / gore / horror / wild animal close-up / …`）。全部候选被拒时自动 fallback 到 `image_gen.py` AI 生成。黄金集 `tests/fixtures/bad_image_selections/tired_teeth_p02_pain.jpg`（2026-06-25 事故图）固化在 `test_golden_image_selections.py` 中防回归。
+
 | 依赖 | 版本建议 | 用途 |
 |------|----------|------|
 | Docker | 最新稳定版 | MySQL 容器 + 每 job 执行容器（**必需**） |
@@ -215,7 +260,7 @@ cd webui && npm install && npm run build && cd ..
 bash scripts/dev-web.sh
 ```
 
-第一次启动会自动跑 DB 迁移（`v1→v6`）。
+第一次启动会自动跑 DB 迁移（`v1→v7`，v6→v7 加 `jobs.revision_of_job_id`）。
 
 ### 7. 验证
 

@@ -65,6 +65,13 @@ class Job(Base):
     pending_confirm: Mapped[str | None] = mapped_column(Text, nullable=True)
     options_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # revisions: this job was created as a modification of another (older) job.
+    # Nullable for non-revision jobs. ON DELETE SET NULL so deleting the
+    # parent doesn't cascade-delete the revision (the revision still has
+    # its own pptx and the user can still download it).
+    revision_of_job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False

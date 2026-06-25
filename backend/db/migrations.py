@@ -117,3 +117,30 @@ def migrate_v4_to_v5() -> bool:
             s.commit()
             changed = True
     return changed
+
+
+def migrate_v6_to_v7() -> bool:
+    """Add jobs.revision_of_job_id so a revision job can link back to the
+    original deck it was derived from. ON DELETE SET NULL at the model
+    layer; SQLite doesn't enforce that, but we don't rely on it — the
+    application code never deletes a parent while revisions exist."""
+    if not _has_users_table():
+        return False
+    if not inspect(engine).has_table("jobs"):
+        return False
+    if _has_column("jobs", "revision_of_job_id"):
+        return False
+    log.warning("migrating DB v6 -> v7 (adding jobs.revision_of_job_id)")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "ALTER TABLE jobs ADD COLUMN revision_of_job_id VARCHAR(36) NULL"
+        )
+    # Index for the GET /revisions query: "find all revisions of this job".
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_jobs_revision_of ON jobs (revision_of_job_id)"
+            )
+    except Exception as e:
+        log.warning("could not create ix_jobs_revision_of index: %s", e)
+    return True
