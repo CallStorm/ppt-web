@@ -9,6 +9,7 @@ import { SlidePreviewModal } from './SlidePreviewModal'
 import { confirmDialog } from '../../stores/modalStore'
 import { useDeleteJob, useRetryJob } from '../../hooks/useJobs'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import { fmtDateTime, fmtDuration, jobElapsedMs } from '../../lib/format'
 
 export function JobCard({ job }: { job: Job }) {
   const hasPptx = !!job.pptx_path
@@ -96,6 +97,15 @@ export function JobCard({ job }: { job: Job }) {
       ? '用户取消'
       : job.error_message?.trim()
   const showErr = (job.status === 'failed' || job.status === 'cancelled') && !!errText
+
+  const dateText = fmtDateTime(job.created_at)
+  const elapsedMs = jobElapsedMs(job)
+  const durationPrefix =
+    job.status === 'done' || job.status === 'failed' || job.status === 'cancelled'
+      ? '耗时'
+      : '已用时'
+  const durationText = elapsedMs == null ? '—' : fmtDuration(elapsedMs)
+  const metaText = `${dateText} · ${durationPrefix} ${durationText}`
 
   return (
     <article
@@ -236,6 +246,13 @@ export function JobCard({ job }: { job: Job }) {
             </div>
           </div>
         </div>
+
+        <p
+          className="mt-1 text-xs text-slate-400 dark:text-slate-500"
+          title={metaText}
+        >
+          {metaText}
+        </p>
 
         {showErr && (
           <p className="mt-1 truncate text-xs text-rose-500/80 dark:text-rose-400/80" title={errText}>

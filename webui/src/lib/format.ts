@@ -49,6 +49,31 @@ export function fmtDateTime(iso: string | null | undefined): string {
   })
 }
 
+const TERMINAL_JOB_STATUSES = new Set(['done', 'failed', 'cancelled'])
+
+/** Elapsed ms from job creation; terminal jobs use updated_at as end. */
+export function jobElapsedMs(
+  job: { status: string; created_at: string | null; updated_at?: string | null },
+  now: Date = new Date(),
+): number | null {
+  const start = parseServerDate(job.created_at)
+  if (!start) return null
+  const terminal = TERMINAL_JOB_STATUSES.has(job.status)
+  const end = terminal ? parseServerDate(job.updated_at) ?? now : now
+  return Math.max(0, end.getTime() - start.getTime())
+}
+
+export function fmtDuration(ms: number): string {
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec} 秒`
+  const min = Math.floor(sec / 60)
+  const remSec = sec % 60
+  if (min < 60) return remSec > 0 ? `${min} 分 ${remSec} 秒` : `${min} 分钟`
+  const hr = Math.floor(min / 60)
+  const remMin = min % 60
+  return remMin > 0 ? `${hr} 小时 ${remMin} 分` : `${hr} 小时`
+}
+
 export function fmtCost(usd: number | null | undefined): string {
   if (usd == null) return '—'
   return `$${Number(usd).toFixed(3)}`
