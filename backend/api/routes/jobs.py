@@ -16,7 +16,12 @@ from backend.api.deps import (
     require_owner_or_admin,
     resolve_job_project_dir,
 )
-from backend.api.schemas.job_options import RevisionItem, job_options_from_form
+from backend.api.schemas.job_options import (
+    GlobalRevision,
+    RevisionItem,
+    RevisionRequest,
+    job_options_from_form,
+)
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
@@ -729,12 +734,8 @@ async def confirm_image_candidate(
 # verbatim to the user.
 
 
-class _RevisionBody(BaseModel):
-    items: list[RevisionItem] = Field(
-        min_length=1,
-        max_length=50,
-        description="Per-slide modification comments (1..50).",
-    )
+class _RevisionBody(RevisionRequest):
+    """Alias for OpenAPI — backward compatible with legacy `{ items: [...] }` bodies."""
 
 
 @router.get("/{job_id}/edit-targets")
@@ -757,6 +758,8 @@ async def get_edit_targets(job_id: str, user: CurrentUser) -> dict:
         "pptx_path": j.pptx_path,
         "project_dir": j.project_dir,
         "slides": [],
+        "spec_summary": None,
+        "job_options": None,
     }
     if j.status != "done":
         out["reason"] = (
@@ -793,6 +796,20 @@ async def get_edit_targets(job_id: str, user: CurrentUser) -> dict:
                 "current_note": notes,
             }
         )
+
+    try:
+        opts = json.loads(j.options_json) if j.options_json else {}
+        out["job_options"] = opts
+    except json.JSONDecodeError:
+        out["job_options"] = None
+
+    if j.project_dir:
+        from backend.runner.spec_lock import build_spec_summary
+
+        out["spec_summary"] = build_spec_summary(
+            Path(j.project_dir), page_count=len(out["slides"])
+        )
+
     return out
 
 
@@ -800,7 +817,7 @@ async def get_edit_targets(job_id: str, user: CurrentUser) -> dict:
 async def post_revision(
     job_id: str, body: _RevisionBody, user: CurrentUser
 ) -> dict:
-    """Submit per-slide modification comments. Creates a new revision
+    """Submit per-slide or global modification. Creates a new revision
     job, copies the source deck, and queues a ``claude --resume`` run.
 
     Always deducts 1 credit (same as a fresh job). On failure during
@@ -810,39 +827,62 @@ async def post_revision(
         j = get_job_or_404(s, job_id)
         require_owner_or_admin(j, user)
 
-    # Validate items against actual slide count.
     slides = _verified_slides(j)
     if not slides:
         raise HTTPException(400, "source job has no slides to edit")
-    max_idx = max(sl["index"] for sl in slides)
-    seen: set[int] = set()
-    for it in body.items:
-        if it.slide_index < 1 or it.slide_index > max_idx:
-            raise HTTPException(
-                400,
-                f"slide_index {it.slide_index} is out of range 1..{max_idx}",
-            )
-        if it.slide_index in seen:
-            raise HTTPException(
-                400, f"duplicate slide_index {it.slide_index} in items"
-            )
-        seen.add(it.slide_index)
-        if not it.comment.strip():
-            raise HTTPException(
-                400, f"slide {it.slide_index}: comment is empty"
-            )
+    page_count = len(slides)
 
-    # Build a slide_index -> name lookup for the prompt template.
-    slide_names = {sl["index"]: sl["name"] for sl in slides}
+    if body.mode == "per_page":
+        max_idx = max(sl["index"] for sl in slides)
+        seen: set[int] = set()
+        for it in body.items or []:
+            if it.slide_index < 1 or it.slide_index > max_idx:
+                raise HTTPException(
+                    400,
+                    f"slide_index {it.slide_index} is out of range 1..{max_idx}",
+                )
+            if it.slide_index in seen:
+                raise HTTPException(
+                    400, f"duplicate slide_index {it.slide_index} in items"
+                )
+            seen.add(it.slide_index)
+            if not it.comment.strip():
+                raise HTTPException(
+                    400, f"slide {it.slide_index}: comment is empty"
+                )
+        slide_names = {sl["index"]: sl["name"] for sl in slides}
+    else:
+        slide_names = None
+        gr = body.global_revision
+        if gr is None:
+            raise HTTPException(400, "global_revision is required for mode=global")
+        if gr.kind in ("colors", "typography") and not j.project_dir:
+            raise HTTPException(400, "project_dir missing")
+        if gr.kind in ("colors", "typography"):
+            lock_path = Path(j.project_dir) / "spec_lock.md"
+            if not lock_path.is_file():
+                raise HTTPException(
+                    400,
+                    "spec_lock.md not found; use custom global instruction instead",
+                )
 
     from backend.runtime.revisions import queue_revision, RevisionError
     try:
-        new_job_id = queue_revision(
-            old_job_id=job_id,
-            items=body.items,
-            user_id=user.id,
-            slide_names=slide_names,
-        )
+        if body.mode == "global":
+            new_job_id = queue_revision(
+                old_job_id=job_id,
+                global_revision=body.global_revision,
+                user_id=user.id,
+                page_count=page_count,
+            )
+        else:
+            new_job_id = queue_revision(
+                old_job_id=job_id,
+                items=body.items,
+                user_id=user.id,
+                slide_names=slide_names,
+                page_count=page_count,
+            )
     except RevisionError as e:
         # Most user-visible failures are 4xx (not done, no credit, …);
         # filesystem failures are 500-ish but we surface them as 400
@@ -873,13 +913,21 @@ async def list_revisions(job_id: str, user: CurrentUser) -> dict:
 
     def _item(job_row: Job, *, is_self: bool) -> dict:
         comments: list[dict] = []
+        global_summary: str | None = None
+        revision_mode: str | None = None
         try:
             opts = json.loads(job_row.options_json) if job_row.options_json else {}
+            revision_mode = opts.get("revision_mode")
+            if revision_mode == "global" and opts.get("global_revision"):
+                from backend.runtime.revisions import format_global_revision_summary
+
+                gr = GlobalRevision.model_validate(opts["global_revision"])
+                global_summary = format_global_revision_summary(gr)
             for it in (opts.get("revision_items") or []):
                 comments.append(
                     {"slide_index": it.get("slide_index"), "comment": it.get("comment", "")}
                 )
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, ValueError):
             pass
         return {
             "job_id": job_row.id,
@@ -894,6 +942,8 @@ async def list_revisions(job_id: str, user: CurrentUser) -> dict:
                 f"/api/jobs/{job_row.id}/preview" if job_row.status == "done" else None
             ),
             "comments": comments,
+            "revision_mode": revision_mode,
+            "global_summary": global_summary,
         }
 
     # If this job itself is a revision, the user wants the full chain.

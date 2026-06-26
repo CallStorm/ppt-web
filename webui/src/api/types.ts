@@ -82,6 +82,40 @@ export interface EditTargetsResponse {
   pptx_path: string | null
   project_dir: string | null
   slides: EditTargetSlide[]
+  spec_summary: SpecSummary | null
+  job_options: Record<string, unknown> | null
+}
+
+export interface SpecSummary {
+  visual_style: string | null
+  colors: Record<string, string>
+  typography: Record<string, string>
+  page_count: number
+  has_spec_lock?: boolean
+}
+
+export type GlobalRevisionKind =
+  | 'colors'
+  | 'typography'
+  | 'visual_style'
+  | 'content'
+  | 'custom'
+
+export type ContentPreset = 'concise' | 'formal' | 'translate_en' | 'glossary'
+
+export interface GlobalRevision {
+  kind: GlobalRevisionKind
+  color_changes?: Record<string, string> | null
+  font_family?: string | null
+  visual_style?: string | null
+  content_preset?: ContentPreset | null
+  comment?: string | null
+}
+
+export interface RevisionRequest {
+  mode: 'per_page' | 'global'
+  items?: RevisionItem[] | null
+  global_revision?: GlobalRevision | null
 }
 
 export interface RevisionItem {
@@ -103,6 +137,8 @@ export interface RevisionEntry {
   pptx_url: string | null
   preview_url: string | null
   comments: RevisionItem[]
+  revision_mode?: 'per_page' | 'global' | null
+  global_summary?: string | null
 }
 
 export interface RevisionsListResponse {

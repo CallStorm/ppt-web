@@ -74,11 +74,17 @@ _spec.loader.exec_module(_revs)
 
 RevisionError = _revs.RevisionError
 _build_revision_prompt = _revs._build_revision_prompt
+_build_global_revision_prompt = _revs._build_global_revision_prompt
 _format_items_for_prompt = _revs._format_items_for_prompt
+format_global_revision_summary = _revs.format_global_revision_summary
 copy_project_dir = _revs.copy_project_dir
 queue_revision = _revs.queue_revision
 
-from backend.api.schemas.job_options import RevisionItem  # noqa: E402
+from backend.api.schemas.job_options import (  # noqa: E402
+    GlobalRevision,
+    RevisionItem,
+    RevisionRequest,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +405,121 @@ class TestQueueRevision(unittest.TestCase):
         self.assertIn("已自动放行", new_job.prompt,
                       "no-session jobs must use the degraded prompt template")
         self.assertIn("design_spec.md", new_job.prompt)
+
+
+# ---------------------------------------------------------------------------
+# Global revision schema + prompts
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalRevisionSchema(unittest.TestCase):
+    def test_colors_requires_changes(self) -> None:
+        with self.assertRaises(ValueError):
+            GlobalRevision(kind="colors")
+
+    def test_colors_validates_hex(self) -> None:
+        with self.assertRaises(ValueError):
+            GlobalRevision(kind="colors", color_changes={"primary": "red"})
+
+    def test_typography_requires_font(self) -> None:
+        with self.assertRaises(ValueError):
+            GlobalRevision(kind="typography")
+
+    def test_visual_style_validates_enum(self) -> None:
+        with self.assertRaises(ValueError):
+            GlobalRevision(kind="visual_style", visual_style="auto")
+
+    def test_revision_request_global_mode(self) -> None:
+        req = RevisionRequest(
+            mode="global",
+            global_revision=GlobalRevision(
+                kind="custom",
+                comment="统一加大标题",
+            ),
+        )
+        self.assertEqual(req.mode, "global")
+
+    def test_revision_request_per_page_legacy(self) -> None:
+        req = RevisionRequest(
+            items=[RevisionItem(slide_index=1, comment="x")],
+        )
+        self.assertEqual(req.mode, "per_page")
+
+
+class TestBuildGlobalRevisionPrompt(unittest.TestCase):
+    def test_colors_mentions_update_spec(self) -> None:
+        gr = GlobalRevision(
+            kind="colors",
+            color_changes={"primary": "#0066AA"},
+        )
+        prompt = _build_global_revision_prompt(
+            "job-1", gr, page_count=5, has_session=True,
+        )
+        self.assertIn("update_spec.py", prompt)
+        self.assertIn("colors.primary", prompt)
+        self.assertIn("#0066AA", prompt)
+        self.assertIn("禁止", prompt)
+
+    def test_visual_style_requires_redraw(self) -> None:
+        gr = GlobalRevision(kind="visual_style", visual_style="dark-tech")
+        prompt = _build_global_revision_prompt(
+            "job-1", gr, page_count=8, has_session=True,
+        )
+        self.assertIn("dark-tech", prompt)
+        self.assertIn("8", prompt)
+        self.assertIn("重画", prompt)
+
+    def test_format_global_summary(self) -> None:
+        gr = GlobalRevision(
+            kind="colors",
+            color_changes={"primary": "#0066AA", "accent": "#FF0000"},
+        )
+        summary = format_global_revision_summary(gr)
+        self.assertIn("换配色", summary)
+        self.assertIn("#0066AA", summary)
+
+
+class TestQueueGlobalRevision(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.tmp.name)
+        self.src_dir = self.tmpdir / "src_deck"
+        self.src_dir.mkdir()
+        (self.src_dir / "svg_output").mkdir()
+        (self.src_dir / "svg_output" / "page_01.svg").write_text("<svg/>")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_global_revision_creates_job(self) -> None:
+        old = _make_job(
+            job_id="old-1", user_id="u1",
+            project_dir=self.src_dir, project_name="deck",
+        )
+        user = _make_user("u1", credits=3)
+        added: list = []
+        s = _setup_session_mock(None, old_job=old, user=user, new_jobs_to_add=added)
+
+        gr = GlobalRevision(kind="custom", comment="全文更简洁")
+
+        with patch("backend.runtime.revisions._SessionLocal", return_value=lambda: s), \
+             patch("backend.runtime.revisions.project_root_for",
+                   return_value=self.tmpdir / "new_root"), \
+             patch("backend.runtime.revisions._notify_dispatcher"):
+            new_id = queue_revision(
+                old_job_id="old-1",
+                global_revision=gr,
+                user_id="u1",
+                page_count=3,
+            )
+
+        self.assertTrue(new_id)
+        new_job = added[0]
+        opts = json.loads(new_job.options_json)
+        self.assertEqual(opts["revision_mode"], "global")
+        self.assertEqual(opts["global_revision"]["kind"], "custom")
+        self.assertIn("全文更简洁", new_job.prompt)
+        self.assertNotIn("revision_items", opts)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ import uuid
 from pathlib import Path
 from typing import Sequence
 
-from backend.api.schemas.job_options import RevisionItem
+from backend.api.schemas.job_options import GlobalRevision, RevisionItem
 from backend.paths import project_root_for
 
 
@@ -174,6 +174,164 @@ def _build_revision_prompt(
     )
 
 
+_CONTENT_PRESET_TEXT: dict[str, str] = {
+    "concise": "全文更简洁，删冗余、缩短句子，保留核心信息",
+    "formal": "语气更正式、更专业",
+    "translate_en": "将全文翻译成英文（标题、正文、图表标注均翻译）",
+    "glossary": "统一专业术语表述，前后一致",
+}
+
+_COLOR_KEY_LABELS: dict[str, str] = {
+    "primary": "主色",
+    "accent": "强调色",
+    "bg": "背景",
+    "text": "正文",
+    "text_secondary": "次要文字",
+    "border": "边框",
+}
+
+
+def format_global_revision_summary(gr: GlobalRevision) -> str:
+    """One-line human summary for version history UI."""
+    if gr.kind == "colors" and gr.color_changes:
+        parts = []
+        for key, val in gr.color_changes.items():
+            label = _COLOR_KEY_LABELS.get(key, key)
+            parts.append(f"{label} → {val}")
+        return "换配色（" + "；".join(parts) + "）"
+    if gr.kind == "typography" and gr.font_family:
+        return f"换字体（{gr.font_family[:60]}）"
+    if gr.kind == "visual_style" and gr.visual_style:
+        return f"视觉风格 → {gr.visual_style}"
+    if gr.kind == "content":
+        preset = _CONTENT_PRESET_TEXT.get(gr.content_preset or "", "")
+        if preset and gr.comment and gr.comment.strip():
+            return f"改内容（{preset}；{gr.comment.strip()[:80]}）"
+        if preset:
+            return f"改内容（{preset}）"
+        if gr.comment:
+            return f"改内容（{gr.comment.strip()[:120]}）"
+    if gr.kind == "custom" and gr.comment:
+        return gr.comment.strip()[:120]
+    return gr.kind
+
+
+def _common_revision_constraints() -> str:
+    return (
+        "硬性约束：\n"
+        "- 不要进入 Eight Confirmations 等需要用户交互的环节\n"
+        "- 不要主动重新调用 image_search / image_gen（除非用户明确要求换图）\n"
+        "- 这一轮只跑一次；完成后只回复「修改完成」四个字，结束本轮\n"
+    )
+
+
+def _postprocess_steps() -> str:
+    return (
+        "后处理（每次修改 SVG 后必须执行）：\n"
+        "1. `python3 skills/ppt-master/scripts/finalize_svg.py <project_dir>`\n"
+        "2. `python3 skills/ppt-master/scripts/svg_to_pptx.py <project_dir>`\n"
+    )
+
+
+def _build_global_revision_prompt(
+    old_job_id: str,
+    gr: GlobalRevision,
+    page_count: int,
+    has_session: bool,
+) -> str:
+    """Build agent prompt for deck-wide modifications."""
+    session_note = ""
+    if not has_session:
+        session_note = (
+            "注意：原 session 不可用，你拿不到完整对话历史；"
+            "请基于 project_dir 自助修改。先 Read design_spec.md / spec_lock.md。\n\n"
+        )
+
+    kind_intro = (
+        f"用户对已完成 PPT (job {old_job_id}) 提出**全局修改**（共 {page_count} 页），"
+        f"类型：{gr.kind}。\n\n"
+    )
+
+    if gr.kind == "colors" and gr.color_changes:
+        changes = "\n".join(
+            f"- colors.{k} → {v}" for k, v in gr.color_changes.items()
+        )
+        body = (
+            f"{session_note}{kind_intro}"
+            f"配色变更：\n{changes}\n\n"
+            "操作步骤：\n"
+            "1. 对每个变更运行 update_spec.py（示例："
+            "`python3 skills/ppt-master/scripts/update_spec.py <project_dir> colors.primary=#0066AA`"
+            "；裸 key 如 primary=#... 也可）\n"
+            "2. **禁止**重画页面或改布局，只做色值替换\n"
+            f"{_postprocess_steps()}\n"
+            f"{_common_revision_constraints()}"
+        )
+        return body
+
+    if gr.kind == "typography" and gr.font_family:
+        fam = gr.font_family.replace("'", "\\'")
+        body = (
+            f"{session_note}{kind_intro}"
+            f"目标字体栈：{gr.font_family}\n\n"
+            "操作步骤：\n"
+            "1. 运行：\n"
+            f"   `python3 skills/ppt-master/scripts/update_spec.py <project_dir> "
+            f"typography.font_family='{fam}'`\n"
+            "2. **禁止**重画页面，只做 font-family 全局替换\n"
+            f"{_postprocess_steps()}\n"
+            f"{_common_revision_constraints()}"
+        )
+        return body
+
+    if gr.kind == "visual_style" and gr.visual_style:
+        body = (
+            f"{session_note}{kind_intro}"
+            f"目标视觉风格：{gr.visual_style}\n\n"
+            "操作步骤：\n"
+            "1. 更新 spec_lock.md 的 visual_style 为上述值；同步 design_spec.md（如存在）\n"
+            "2. Read 对应 visual-styles 参考文件了解新风格规则\n"
+            f"3. **逐页重画全部 {page_count} 页**：每页生成前重读 spec_lock.md；"
+            "用 Write 工具写入 svg_output/page_XX_*.svg\n"
+            f"{_postprocess_steps()}\n"
+            f"{_common_revision_constraints()}"
+        )
+        return body
+
+    if gr.kind == "content":
+        preset_line = ""
+        if gr.content_preset:
+            preset_line = f"内容基调：{_CONTENT_PRESET_TEXT[gr.content_preset]}\n"
+        comment_line = ""
+        if gr.comment and gr.comment.strip():
+            comment_line = f"用户补充：{gr.comment.strip()}\n"
+        body = (
+            f"{session_note}{kind_intro}"
+            f"{preset_line}{comment_line}\n"
+            "操作步骤：\n"
+            f"1. 逐页 Read svg_output/ 下全部 {page_count} 页的 SVG\n"
+            "2. 按基调修改文案；尽量用 Edit 小改，版式大动才 Write 重画\n"
+            "3. 不要改颜色、图片、图标（除非补充说明里明确要求）\n"
+            f"{_postprocess_steps()}\n"
+            f"{_common_revision_constraints()}"
+        )
+        return body
+
+    # custom
+    comment = (gr.comment or "").strip()
+    body = (
+        f"{session_note}{kind_intro}"
+        f"用户全局指令：\n{comment}\n\n"
+        "请自行判断操作轻重：\n"
+        "- 换色/换字 → 优先 update_spec.py\n"
+        "- 换风格/大改布局 → 逐页重画\n"
+        "- 改文案 → 尽量 Edit 保留版式\n"
+        f"{_postprocess_steps()}\n"
+        f"{_common_revision_constraints()}"
+    )
+    return body
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -187,9 +345,11 @@ class RevisionError(Exception):
 def queue_revision(
     *,
     old_job_id: str,
-    items: list[RevisionItem],
     user_id: str,
+    items: list[RevisionItem] | None = None,
+    global_revision: GlobalRevision | None = None,
     slide_names: dict[int, str] | None = None,
+    page_count: int = 0,
 ) -> str:
     """Validate, copy project_dir, create a new job, deduct credit, queue
     a resume. Returns the new job's id. Raises ``RevisionError`` on
@@ -202,12 +362,21 @@ def queue_revision(
     # the real ``backend.models`` import.
     from backend.models import Job, User  # noqa: WPS433
 
-    if not items:
+    is_global = global_revision is not None
+    if not is_global and not items:
         raise RevisionError("at least one revision item is required")
+    if is_global and items:
+        raise RevisionError("cannot combine per-page items with global_revision")
 
     new_job_id = str(uuid.uuid4())
-    log.info("queue_revision: old=%s new=%s user=%s items=%d",
-             old_job_id, new_job_id, user_id, len(items))
+    log.info(
+        "queue_revision: old=%s new=%s user=%s global=%s items=%d",
+        old_job_id,
+        new_job_id,
+        user_id,
+        is_global,
+        len(items or []),
+    )
 
     with _SessionLocal()() as s:
         old = s.get(Job, old_job_id)
@@ -232,15 +401,33 @@ def queue_revision(
             raise RevisionError("quota exhausted; cannot start revision")
         u.quota_credits -= 1
 
-        # ── Compose options: inherit from old job, then attach revision_items ──
+        # ── Compose options: inherit from old job, attach revision payload ──
         try:
             old_opts = json.loads(old.options_json) if old.options_json else {}
         except json.JSONDecodeError:
             old_opts = {}
-        # Strip any revision_items the parent might have had — only this
-        # job's items matter.
         old_opts.pop("revision_items", None)
-        old_opts["revision_items"] = [it.model_dump() for it in items]
+        old_opts.pop("global_revision", None)
+        old_opts.pop("revision_mode", None)
+
+        if is_global and global_revision:
+            old_opts["revision_mode"] = "global"
+            old_opts["global_revision"] = global_revision.model_dump()
+            prompt = _build_global_revision_prompt(
+                old_job_id=old_job_id,
+                gr=global_revision,
+                page_count=page_count or 1,
+                has_session=bool(old.session_id),
+            )
+        else:
+            old_opts["revision_mode"] = "per_page"
+            old_opts["revision_items"] = [it.model_dump() for it in (items or [])]
+            prompt = _build_revision_prompt(
+                old_job_id=old_job_id,
+                items=items or [],
+                has_session=bool(old.session_id),
+                slide_names=slide_names,
+            )
         new_options_json = json.dumps(old_opts, ensure_ascii=False)
 
         # Project name gets a -r2 / -r3 suffix so it doesn't clash with
@@ -251,12 +438,7 @@ def queue_revision(
         s.add(Job(
             id=new_job_id,
             user_id=user_id,
-            prompt=_build_revision_prompt(
-                old_job_id=old_job_id,
-                items=items,
-                has_session=bool(old.session_id),
-                slide_names=slide_names,
-            ),
+            prompt=prompt,
             project_name=new_project_name,
             status="queued",
             require_confirm=False,

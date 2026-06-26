@@ -177,6 +177,67 @@ export const FORMULA_POLICY_OPTIONS: OptionItem<JobFormulaPolicy>[] = [
   { value: 'text-only', label: '全部留文本' },
 ]
 
+/** Preset font stacks for global typography revision */
+export const FONT_FAMILY_OPTIONS: OptionItem<string>[] = [
+  {
+    value: '"Microsoft YaHei", "PingFang SC", Arial, sans-serif',
+    label: '微软雅黑 / 苹方（默认中文）',
+  },
+  {
+    value: 'SimSun, "Songti SC", serif',
+    label: '宋体 / 宋体-简',
+  },
+  {
+    value: 'Arial, Helvetica, sans-serif',
+    label: 'Arial / Helvetica',
+  },
+  {
+    value: 'Georgia, "Times New Roman", serif',
+    label: 'Georgia / Times',
+  },
+  {
+    value: 'Consolas, "Courier New", monospace',
+    label: 'Consolas / Courier（等宽）',
+  },
+]
+
+export const SPEC_COLOR_LABELS: Record<string, string> = {
+  primary: '主色',
+  accent: '强调色',
+  bg: '背景',
+  text: '正文',
+  text_secondary: '次要文字',
+  border: '边框',
+}
+
+export const SPEC_COLOR_KEYS = [
+  'primary',
+  'accent',
+  'bg',
+  'text',
+  'text_secondary',
+  'border',
+] as const
+
+export const CONTENT_PRESET_OPTIONS: OptionItem<
+  'concise' | 'formal' | 'translate_en' | 'glossary'
+>[] = [
+  { value: 'concise', label: '全文更简洁' },
+  { value: 'formal', label: '语气更正式' },
+  { value: 'translate_en', label: '翻译成英文' },
+  { value: 'glossary', label: '统一专业术语' },
+]
+
+export const GLOBAL_REVISION_KIND_OPTIONS: OptionItem<
+  'colors' | 'typography' | 'visual_style' | 'content' | 'custom'
+>[] = [
+  { value: 'colors', label: '换配色' },
+  { value: 'typography', label: '换字体' },
+  { value: 'visual_style', label: '换视觉风格' },
+  { value: 'content', label: '改内容基调' },
+  { value: 'custom', label: '自定义全局指令' },
+]
+
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
   language: 'zh',
   scenario: 'general',

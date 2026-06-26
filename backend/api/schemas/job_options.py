@@ -5,7 +5,7 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 # ── 现有枚举 ─────────────────────────────────────────────
 Language = Literal["zh", "en", "bilingual"]
@@ -77,6 +77,95 @@ class RevisionItem(BaseModel):
     comment: str = Field(min_length=1, max_length=1000)
 
 
+GlobalRevisionKind = Literal[
+    "colors", "typography", "visual_style", "content", "custom"
+]
+ContentPreset = Literal["concise", "formal", "translate_en", "glossary"]
+
+# spec_lock colors section keys exposed in the global color editor
+SPEC_COLOR_KEYS = (
+    "primary",
+    "accent",
+    "bg",
+    "text",
+    "text_secondary",
+    "border",
+)
+
+_GLOBAL_VISUAL_STYLES = tuple(
+    s for s in VISUAL_STYLES if s != "auto"
+)
+
+
+class GlobalRevision(BaseModel):
+    """Deck-wide modification request (one kind per submission)."""
+
+    kind: GlobalRevisionKind
+    color_changes: dict[str, str] | None = None
+    font_family: str | None = Field(default=None, max_length=500)
+    visual_style: str | None = None
+    content_preset: ContentPreset | None = None
+    comment: str | None = Field(default=None, max_length=2000)
+
+    def model_post_init(self, __context) -> None:  # type: ignore[override]
+        if self.kind == "colors":
+            if not self.color_changes:
+                raise ValueError("color_changes is required for kind=colors")
+            for key, val in self.color_changes.items():
+                if key not in SPEC_COLOR_KEYS:
+                    raise ValueError(
+                        f"color_changes key must be one of {list(SPEC_COLOR_KEYS)}, got {key!r}"
+                    )
+                if not HEX_RE.match(val):
+                    raise ValueError(f"color {key} must be #RRGGBB, got {val!r}")
+        elif self.kind == "typography":
+            if not self.font_family or not self.font_family.strip():
+                raise ValueError("font_family is required for kind=typography")
+        elif self.kind == "visual_style":
+            if not self.visual_style or self.visual_style not in _GLOBAL_VISUAL_STYLES:
+                raise ValueError(
+                    f"visual_style must be one of {list(_GLOBAL_VISUAL_STYLES)}, "
+                    f"got {self.visual_style!r}"
+                )
+        elif self.kind == "content":
+            if not self.content_preset and not (self.comment and self.comment.strip()):
+                raise ValueError(
+                    "content_preset or comment is required for kind=content"
+                )
+        elif self.kind == "custom":
+            if not self.comment or not self.comment.strip():
+                raise ValueError("comment is required for kind=custom")
+
+
+class RevisionRequest(BaseModel):
+    """POST /revisions body — per-page or global (mutually exclusive)."""
+
+    mode: Literal["per_page", "global"] = "per_page"
+    items: list[RevisionItem] | None = Field(
+        default=None,
+        max_length=50,
+        description="Per-slide comments when mode=per_page.",
+    )
+    global_revision: GlobalRevision | None = Field(
+        default=None,
+        description="Deck-wide modification when mode=global.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self) -> "RevisionRequest":
+        if self.mode == "per_page":
+            if not self.items or len(self.items) < 1:
+                raise ValueError("items must contain at least one entry for mode=per_page")
+            if self.global_revision is not None:
+                raise ValueError("global_revision must be omitted for mode=per_page")
+        else:
+            if self.global_revision is None:
+                raise ValueError("global_revision is required for mode=global")
+            if self.items:
+                raise ValueError("items must be omitted for mode=global")
+        return self
+
+
 class JobOptions(BaseModel):
     # ── 现有（保持） ─────────────────────────────────────
     language: Language = "zh"
@@ -110,6 +199,14 @@ class JobOptions(BaseModel):
     revision_items: list[RevisionItem] | None = Field(
         default=None,
         description="Per-slide modification comments driving this revision job",
+    )
+    revision_mode: Literal["per_page", "global"] | None = Field(
+        default=None,
+        description="How this revision job was created",
+    )
+    global_revision: GlobalRevision | None = Field(
+        default=None,
+        description="Deck-wide modification payload when revision_mode=global",
     )
 
     def model_post_init(self, __context) -> None:  # type: ignore[override]

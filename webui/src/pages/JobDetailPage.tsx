@@ -393,6 +393,11 @@ export function JobDetailPage() {
                       )}
                       <span className="text-xs text-slate-500">{r.status}</span>
                     </div>
+                    {r.revision_mode === 'global' && r.global_summary && (
+                      <p className="mt-1 text-xs text-gemini-700 dark:text-gemini-300">
+                        全局 · {r.global_summary}
+                      </p>
+                    )}
                     {r.comments.length > 0 && (
                       <ul className="mt-1 list-disc pl-5 text-xs text-slate-500 dark:text-slate-400">
                         {r.comments.slice(0, 3).map((c, i) => (
