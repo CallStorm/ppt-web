@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import shutil
+import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -450,13 +452,40 @@ async def download_preview(job_id: str, user: CurrentUser):
         return FileResponse(preview, media_type=media_type)
 
 
-def _verified_slides(j: Job) -> list[dict]:
-    """Ordered slide descriptors for ``j``, path-traversal-guarded.
+_SLIDE_MANIFEST_TTL = 15.0
+_slide_manifest_cache: dict[str, tuple[float, float, list[dict]]] = {}
+_slide_manifest_locks: dict[str, threading.Lock] = {}
+_slide_manifest_locks_guard = threading.Lock()
 
-    Mirrors the allowed-roots check used by ``/preview``: a slide file must live
-    under either the user's project root or the recorded ``project_dir`` parent.
-    """
-    project_dir = resolve_job_project_dir(j)
+
+def _slide_manifest_lock(job_id: str) -> threading.Lock:
+    with _slide_manifest_locks_guard:
+        lock = _slide_manifest_locks.get(job_id)
+        if lock is None:
+            lock = threading.Lock()
+            _slide_manifest_locks[job_id] = lock
+        return lock
+
+
+def _project_slide_fingerprint(project_dir: Path | None) -> float:
+    """Cheap change detector for slide files under a project directory."""
+    if not project_dir or not project_dir.is_dir():
+        return 0.0
+    best = 0.0
+    for sub in ("svg_final", "svg_output", ".preview"):
+        d = project_dir / sub
+        if not d.is_dir():
+            continue
+        try:
+            for p in d.iterdir():
+                if p.is_file():
+                    best = max(best, p.stat().st_mtime)
+        except OSError:
+            continue
+    return best
+
+
+def _build_verified_slides(j: Job, project_dir: Path | None) -> list[dict]:
     slides = list_slides(project_dir)
     if not slides:
         return []
@@ -476,6 +505,29 @@ def _verified_slides(j: Job) -> list[dict]:
         if any(is_under(resolved, root) for root in allowed_roots):
             verified.append(sl)
     return verified
+
+
+def _verified_slides(j: Job) -> list[dict]:
+    """Ordered slide descriptors for ``j``, path-traversal-guarded.
+
+    Mirrors the allowed-roots check used by ``/preview``: a slide file must live
+    under either the user's project root or the recorded ``project_dir`` parent.
+
+    Cached briefly so opening the preview modal (one manifest request plus N
+    parallel ``/slides/{i}`` fetches) does not re-run ``list_slides`` /
+    ``refresh_stale_pages`` on every thumbnail.
+    """
+    project_dir = resolve_job_project_dir(j)
+    fingerprint = _project_slide_fingerprint(project_dir)
+    now = time.monotonic()
+    lock = _slide_manifest_lock(j.id)
+    with lock:
+        hit = _slide_manifest_cache.get(j.id)
+        if hit and now - hit[0] < _SLIDE_MANIFEST_TTL and hit[1] == fingerprint:
+            return hit[2]
+        verified = _build_verified_slides(j, project_dir)
+        _slide_manifest_cache[j.id] = (now, fingerprint, verified)
+        return verified
 
 
 @router.get("/{job_id}/slides")

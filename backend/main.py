@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 
 from backend.admin import router as admin_router
 from backend.api.router import router as api_router
@@ -69,6 +71,24 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ppt-web MVP", lifespan=lifespan)
+
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(SATimeoutError)
+    async def db_busy_handler(request: Request, exc: Exception):
+        from backend.db.session import pool_status
+
+        log.warning(
+            "database busy on %s: %s pool=%s",
+            request.url.path,
+            exc,
+            pool_status(),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "database busy, retry shortly"},
+            headers={"Retry-After": "1"},
+        )
+
     app.include_router(api_router)
     app.include_router(admin_router, prefix="/api/admin")
     mount_spa(app)

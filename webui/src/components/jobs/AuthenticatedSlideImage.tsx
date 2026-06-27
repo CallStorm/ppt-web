@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react'
+import { withSlideFetchLimit } from '../../lib/slideFetchQueue'
+
+const RETRYABLE_STATUSES = new Set([401, 500, 503])
 
 async function fetchSlideBlob(url: string): Promise<Blob> {
-  const maxAttempts = 3
+  const maxAttempts = 4
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const r = await fetch(url, { credentials: 'same-origin' })
+    const r = await withSlideFetchLimit(() =>
+      fetch(url, { credentials: 'same-origin' }),
+    )
     if (r.ok) return r.blob()
-    if (r.status === 401 && attempt < maxAttempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
+    if (RETRYABLE_STATUSES.has(r.status) && attempt < maxAttempts - 1) {
+      const retryAfter = Number(r.headers.get('Retry-After'))
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : 250 * (attempt + 1)
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
       continue
     }
     throw new Error(`${r.status}`)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, Request, status
@@ -13,6 +14,9 @@ from backend.db.session import SessionLocal
 from backend.models import User
 
 log = logging.getLogger("backend.auth.deps")
+
+_USER_CACHE_TTL = 60.0
+_user_cache: dict[str, tuple[float, User]] = {}
 
 
 def _db() -> Session:
@@ -33,10 +37,15 @@ def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token missing sub")
+    now = time.monotonic()
+    cached = _user_cache.get(user_id)
+    if cached and now - cached[0] < _USER_CACHE_TTL:
+        return cached[1]
     with _db() as s:
         u = s.get(User, user_id)
         if not u:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
+        _user_cache[user_id] = (now, u)
         return u
 
 
