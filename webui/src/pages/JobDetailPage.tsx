@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, downloadUrl } from '../api/client'
 import type { RevisionsListResponse, SseEvent } from '../api/types'
-import { useJob } from '../hooks/useJobs'
+import { useJob, useDeleteJob, useRetryJob } from '../hooks/useJobs'
 import { useJobEvents } from '../hooks/useJobEvents'
 import { StatusPill } from '../components/jobs/StatusPill'
 import { fmtCost, fmtDateTime, truncate } from '../lib/format'
@@ -36,7 +36,10 @@ type Tab = 'overview' | 'raw' | 'timeline' | 'files'
 
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { data: job, isLoading, error, refetch } = useJob(id)
+  const deleteJob = useDeleteJob()
+  const retryJob = useRetryJob()
   const [tab, setTab] = useState<Tab>('overview')
   const [timeline, setTimeline] = useState<SseEvent[]>([])
   const [stage, setStage] = useState<Record<string, unknown> | null>(null)
@@ -68,6 +71,7 @@ export function JobDetailPage() {
 
   const hasPptx = !!job?.pptx_path
   const isPaused = job?.status === 'paused'
+  const isPausedStuck = isPaused && !job?.session_id
   const isActive = job && ['running', 'queued', 'paused'].includes(job.status)
 
   // Version chain (this job + any later revisions). Used to (a) make the
@@ -275,7 +279,71 @@ export function JobDetailPage() {
         </div>
       )}
 
-      {isPaused && (
+      {isPausedStuck && (
+        <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-900/20">
+          <h3 className="text-sm font-medium text-rose-800 dark:text-rose-200">
+            任务已中断，无法继续确认
+          </h3>
+          <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">
+            生成会话已丢失（常见于服务异常或数据库繁忙）。不能提交确认，请删除后重新创建，或尝试重试。
+          </p>
+          {job.error_message && (
+            <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{job.error_message}</p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={retryJob.isPending}
+              onClick={async () => {
+                if (!id) return
+                try {
+                  await retryJob.mutateAsync(id)
+                  notifySuccess('已重新排队')
+                  await refetch()
+                } catch (e) {
+                  notifyError(e instanceof Error ? e.message : '重试失败')
+                }
+              }}
+              className="rounded-md bg-gemini-600 px-4 py-1.5 text-sm text-white hover:bg-gemini-700 disabled:opacity-50"
+            >
+              {retryJob.isPending ? '提交中…' : '重试生成'}
+            </button>
+            <button
+              type="button"
+              onClick={doCancel}
+              className="rounded-md border border-rose-300 px-4 py-1.5 text-sm text-rose-700 hover:bg-rose-100 dark:border-rose-700 dark:text-rose-300"
+            >
+              标记取消
+            </button>
+            <button
+              type="button"
+              disabled={deleteJob.isPending}
+              onClick={async () => {
+                if (!id) return
+                const ok = await confirmDialog({
+                  title: '删除作品',
+                  body: '确认删除此中断的任务？',
+                  confirmText: '删除',
+                  cancelText: '取消',
+                })
+                if (!ok) return
+                try {
+                  await deleteJob.mutateAsync(id)
+                  notifySuccess('已删除')
+                  navigate('/')
+                } catch (e) {
+                  notifyError(e instanceof Error ? e.message : '删除失败')
+                }
+              }}
+              className="rounded-md border border-slate-300 px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isPaused && !isPausedStuck && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
           <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">需要确认</h3>
           <textarea
@@ -295,6 +363,12 @@ export function JobDetailPage() {
           </button>
         </div>
       )}
+
+      {job.status === 'running' || job.status === 'queued' ? (
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+          正在自动生成，请稍候。生成过程中无法修改大纲或风格；完成后可使用「编辑修改」调整内容。
+        </div>
+      ) : null}
 
       <div className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-700">
         {tabs.map((t) => (

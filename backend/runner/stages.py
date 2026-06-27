@@ -141,6 +141,8 @@ def build_initial_prompt(
         "1. 八点确认（Step 4）已禁用：不要停下来等用户确认。直接采用你列出的推荐默认值"
         "（画布/页数/风格/配色/字体/图标/生图策略/导出格式），一气呵成跑完所有非阻塞步骤直到导出 pptx。"
         "【不要】启动 confirm_ui/server.py（它在无头模式下会阻塞挂死）。",
+        "   若下方「PPT 生成要求」中用户已锁定 visual_style，Layer 2 视觉风格不得重新推荐或替换；"
+        "spec_lock.md 必须写入该值，并 read_file 对应 visual-styles/{id}.md。",
         "2. 跳过需要外部 API 的可选功能（AI 生图可用网络搜图兜底，或用纯色/图标占位；不要因为缺 key 而失败）。",
         "3. 完成导出后明确告知 exports 下生成的 .pptx 路径。",
         "",

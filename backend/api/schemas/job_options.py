@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -36,20 +38,31 @@ ImageStrategy = Literal["ai", "web", "provided", "placeholder", "none"]
 IconStrategy = Literal["emoji", "library", "ai", "custom"]
 FormulaPolicy = Literal["mixed", "render-all", "text-only"]
 
-# visual_style 子集：ppt-master catalog 取常用 10 个 + auto（auto = 由 AI 推荐）
+# visual_style：ppt-master 全量 18 预设 + auto（auto = 由 AI 推荐）
 VISUAL_STYLES = (
     "auto",
     "swiss-minimal",
+    "soft-rounded",
     "glassmorphism",
     "dark-tech",
-    "brutalist",
-    "editorial",
     "blueprint",
+    "editorial",
     "photo-editorial",
-    "soft-rounded",
     "data-journalism",
+    "brutalist",
     "memphis",
+    "zine",
+    "vintage-poster",
+    "paper-cut",
+    "sketch-notes",
+    "ink-notes",
+    "chalkboard",
+    "ink-wash",
+    "pixel-art",
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_VISUAL_STYLE_CATALOG_PATH = _REPO_ROOT / "webui" / "src" / "lib" / "visualStyleCatalog.json"
 
 # 配色行业预设：与 ppt-master INDUSTRY_COLORS 思路对齐
 INDUSTRY_PRESETS = (
@@ -277,19 +290,20 @@ _MODE: dict[Mode, tuple[str, str]] = {
     "showcase": ("展示", "视觉主导、案例驱动"),
 }
 
-_VISUAL_STYLE_DESC: dict[str, str] = {
-    "auto": "由 AI 根据内容推荐",
-    "swiss-minimal": "瑞士极简：网格严谨、留白克制、无装饰，企业内训/通用首选",
-    "glassmorphism": "玻璃拟态：透明层 + 模糊背景，现代科技产品发布",
-    "dark-tech": "深色科技：深底 + 高亮强调，技术发布会、SDK 介绍",
-    "brutalist": "粗野主义：高对比、粗排版、冲击力强，主题演讲/重磅发布",
-    "editorial": "编辑设计：杂志风、图文混排，适合内容型/案例型",
-    "blueprint": "蓝图：线条密集、技术注释，工程方案/技术架构",
-    "photo-editorial": "图册编辑：大图主导、文字克制，旅行/品牌故事",
-    "soft-rounded": "柔圆亲和：圆角、暖色调，ToC、教育、母婴",
-    "data-journalism": "数据新闻：图表密集、信息密度高，调研报告/年报",
-    "memphis": "孟菲斯：色块拼接、几何装饰，创意/营销/活动",
-}
+@lru_cache(maxsize=1)
+def _visual_style_catalog_entries() -> dict[str, dict]:
+    """Load per-style metadata from webui catalog (single source of truth)."""
+    if not _VISUAL_STYLE_CATALOG_PATH.is_file():
+        return {}
+    data = json.loads(_VISUAL_STYLE_CATALOG_PATH.read_text(encoding="utf-8"))
+    return {s["id"]: s for s in data.get("styles", []) if s.get("id")}
+
+
+def _visual_style_desc(style_id: str) -> str:
+    entry = _visual_style_catalog_entries().get(style_id)
+    if entry:
+        return f"{entry.get('title', style_id)}：{entry.get('tagline', '')}"
+    return style_id
 
 _INDUSTRY_COLOR: dict[str, str] = {
     "finance": "海军蓝 #003366 — 稳重可信",
@@ -398,12 +412,41 @@ def format_options_for_prompt(opts: JobOptions) -> str:
     lines.append(f"- 画布：{_CANVAS[opts.canvas]}")
     lines.append(f"- 目标页数：约 {opts.page_count} 页（可在 ±1 页内微调以适配内容，但不要明显超出）")
     lines.append(f"- 叙事模式：{mode_label}（{mode_hint}）")
-    if opts.visual_style and opts.visual_style != "auto":
-        style_desc = _VISUAL_STYLE_DESC.get(opts.visual_style, opts.visual_style)
-        lines.append(f"- 视觉风格：{opts.visual_style}（{style_desc}）")
+    locked_style = opts.visual_style if opts.visual_style and opts.visual_style != "auto" else None
+    if locked_style:
+        style_desc = _visual_style_desc(locked_style)
+        lines.append(f"- 视觉风格：{locked_style}（{style_desc}）")
     else:
         lines.append("- 视觉风格：auto（请根据内容/受众/场合自己挑选最合适的视觉风格预设，不要默认扁平卡片网格）")
     lines.append("")
+
+    # ── 视觉风格锁定（用户已选） ─────────────────────────
+    if locked_style:
+        meta = _visual_style_catalog_entries().get(locked_style, {})
+        lines.append("【视觉风格锁定（用户已选，不得覆盖）】")
+        lines.append(
+            f"- spec_lock.md 的 visual_style 必须写为：{locked_style}；"
+            "禁止改为 auto、其它预设或 image-rendering 名（flat、digital-dashboard 等）"
+        )
+        lines.append(
+            f"- 必须先 read_file：skills/ppt-master/references/visual-styles/{locked_style}.md"
+            " 并严格遵循其形状/留白/禁止项"
+        )
+        paired = meta.get("pairedRendering")
+        if paired:
+            lines.append(
+                f"- 有图时 image_rendering 优先配对：{paired}（写入 design_spec / spec_lock）"
+            )
+        rules = meta.get("rules") or []
+        if rules:
+            lines.append("- 执行检查清单：")
+            for rule in rules:
+                lines.append(f"  · {rule}")
+        lines.append(
+            "- 封面、内容页、结尾页共用同一套 spec_lock.colors；"
+            "封面/结尾可换布局节奏（anchor/breathing），但不得单独换主色或违背风格禁止项"
+        )
+        lines.append("")
 
     # ── 配色 ───────────────────────────────────────────
     lines.append("【配色】")
@@ -415,6 +458,10 @@ def format_options_for_prompt(opts: JobOptions) -> str:
         lines.append(f"- 模式：行业预设（{opts.industry} — {ind_desc}）")
     else:
         lines.append("- 模式：auto（请根据行业/受众/场合自动选色，遵循 60-30-10 规则）")
+        if locked_style:
+            color_hint = _visual_style_catalog_entries().get(locked_style, {}).get("colorHint")
+            if color_hint:
+                lines.append(f"- 已与锁定风格搭配的配色倾向（非强制 HEX）：{color_hint}")
     lines.append("")
 
     # ── 图片策略 ───────────────────────────────────────

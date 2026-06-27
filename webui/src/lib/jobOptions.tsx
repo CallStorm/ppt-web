@@ -27,15 +27,23 @@ export type JobFormulaPolicy = 'mixed' | 'render-all' | 'text-only'
 export type JobVisualStyle =
   | 'auto'
   | 'swiss-minimal'
+  | 'soft-rounded'
   | 'glassmorphism'
   | 'dark-tech'
-  | 'brutalist'
-  | 'editorial'
   | 'blueprint'
+  | 'editorial'
   | 'photo-editorial'
-  | 'soft-rounded'
   | 'data-journalism'
+  | 'brutalist'
   | 'memphis'
+  | 'zine'
+  | 'vintage-poster'
+  | 'paper-cut'
+  | 'sketch-notes'
+  | 'ink-notes'
+  | 'chalkboard'
+  | 'ink-wash'
+  | 'pixel-art'
 
 export type JobIndustry =
   | 'finance'
@@ -129,15 +137,23 @@ export const MODE_OPTIONS: OptionItem<JobMode>[] = [
 export const VISUAL_STYLE_OPTIONS: OptionItem<JobVisualStyle>[] = [
   { value: 'auto', label: 'AI 智能感知' },
   { value: 'swiss-minimal', label: '瑞士极简 · 企业内训首选' },
+  { value: 'soft-rounded', label: '柔圆亲和 · ToC/教育' },
   { value: 'glassmorphism', label: '玻璃拟态 · 现代科技' },
   { value: 'dark-tech', label: '深色科技 · 技术发布' },
-  { value: 'brutalist', label: '粗野主义 · 重磅发布' },
-  { value: 'editorial', label: '编辑设计 · 内容型' },
   { value: 'blueprint', label: '蓝图 · 工程方案' },
+  { value: 'editorial', label: '编辑设计 · 内容型' },
   { value: 'photo-editorial', label: '图册编辑 · 大图主导' },
-  { value: 'soft-rounded', label: '柔圆亲和 · ToC/教育' },
   { value: 'data-journalism', label: '数据新闻 · 图表密集' },
+  { value: 'brutalist', label: '粗野主义 · 重磅发布' },
   { value: 'memphis', label: '孟菲斯 · 创意营销' },
+  { value: 'zine', label: '独立杂志 · 文化设计' },
+  { value: 'vintage-poster', label: '复古海报 · 文旅周年' },
+  { value: 'paper-cut', label: '剪纸层叠 · 民俗文化' },
+  { value: 'sketch-notes', label: '手绘速写 · 教学培训' },
+  { value: 'ink-notes', label: '墨笔记 · 方法论' },
+  { value: 'chalkboard', label: '黑板粉笔 · 课堂教程' },
+  { value: 'ink-wash', label: '水墨留白 · 新中式' },
+  { value: 'pixel-art', label: '像素复古 · 游戏怀旧' },
 ]
 
 export const COLOR_MODE_OPTIONS: OptionItem<JobColorMode>[] = [
@@ -344,6 +360,31 @@ const autoGlow = (
   </span>
 )
 
+const zineHalftone = (
+  <div className="flex gap-0.5">
+    <div className="h-4 w-4 rounded-sm bg-rose-400" />
+    <div className="h-4 w-4 rounded-sm bg-cyan-400 translate-x-[-2px]" />
+  </div>
+)
+const vintageBlock = <div className="h-5 w-10 rounded-sm bg-amber-600" />
+const paperLayers = (
+  <div className="flex flex-col gap-0.5">
+    <div className="h-1.5 w-10 rounded-sm bg-emerald-500 shadow-sm" />
+    <div className="h-1.5 w-8 rounded-sm bg-emerald-400 shadow-sm" />
+  </div>
+)
+const sketchDoodle = <div className="h-5 w-10 rounded-sm border-2 border-dashed border-amber-600" />
+const inkStroke = <div className="h-0.5 w-10 rounded-full bg-slate-800" />
+const chalkLine = <div className="h-0.5 w-10 rounded-full bg-white/90" />
+const inkWash = <div className="h-6 w-10 rounded-sm bg-gradient-to-b from-slate-200 to-slate-500" />
+const pixelBlock = (
+  <div className="grid grid-cols-4 gap-0.5">
+    {[...Array(8)].map((_, i) => (
+      <div key={i} className="h-1.5 w-1.5 bg-violet-500" />
+    ))}
+  </div>
+)
+
 export const VISUAL_STYLE_SWATCH: Record<JobVisualStyle, SwatchSpec> = {
   auto: {
     bg: 'bg-gradient-to-br from-gemini-100 via-violet-100 to-pink-100 dark:from-gemini-900/40 dark:via-violet-900/40 dark:to-pink-900/40',
@@ -362,6 +403,14 @@ export const VISUAL_STYLE_SWATCH: Record<JobVisualStyle, SwatchSpec> = {
   'soft-rounded': { bg: 'bg-pink-50 dark:bg-pink-950', glyph: softBlobs },
   'data-journalism': { bg: 'bg-orange-50 dark:bg-orange-950', glyph: dataBars },
   memphis: { bg: 'bg-yellow-100 dark:bg-yellow-950', glyph: memphisShapes },
+  zine: { bg: 'bg-rose-50 dark:bg-rose-950', glyph: zineHalftone },
+  'vintage-poster': { bg: 'bg-amber-100 dark:bg-amber-950', glyph: vintageBlock },
+  'paper-cut': { bg: 'bg-emerald-50 dark:bg-emerald-950', glyph: paperLayers },
+  'sketch-notes': { bg: 'bg-amber-50 dark:bg-amber-950', glyph: sketchDoodle },
+  'ink-notes': { bg: 'bg-stone-100 dark:bg-stone-800', glyph: inkStroke },
+  chalkboard: { bg: 'bg-slate-800 dark:bg-slate-950', glyph: chalkLine },
+  'ink-wash': { bg: 'bg-slate-100 dark:bg-slate-800', glyph: inkWash },
+  'pixel-art': { bg: 'bg-violet-100 dark:bg-violet-950', glyph: pixelBlock },
 }
 
 /* ── 配色色谱：每条 4 swatch + 1 行标签 ── */

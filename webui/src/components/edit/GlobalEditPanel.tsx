@@ -5,7 +5,7 @@ import type {
   GlobalRevisionKind,
   SpecSummary,
 } from '../../api/types'
-import { VisualStyleChips } from '../jobs/VisualStyleChips'
+import { VisualStyleGallery } from '../jobs/VisualStyleGallery'
 import {
   collectColorChanges,
   ColorPaletteEditor,
@@ -146,12 +146,13 @@ export function GlobalEditPanel({
             <p className="text-xs text-amber-700 dark:text-amber-300">
               将按新风格重画全部 {slides.length} 页，耗时明显长于换色/换字，布局可能变化。
             </p>
-            <VisualStyleChips
+            <VisualStyleGallery
               value={visualStyle === 'auto' ? 'swiss-minimal' : visualStyle}
               onChange={(v) => {
                 if (v !== 'auto') onVisualStyleChange(v)
               }}
               coreTopic=""
+              showAuto={false}
             />
             <p className="text-xs text-slate-500">
               可选风格：{nonAutoStyles.map((o) => o.label.split('·')[0].trim()).join('、')}

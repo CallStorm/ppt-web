@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -6,7 +6,8 @@ import { useAuthStore } from '../stores/authStore'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 import { invalidateJobLists } from '../hooks/useJobs'
 import { FileUploadZone } from '../components/jobs/FileUploadZone'
-import { VisualStyleChips } from '../components/jobs/VisualStyleChips'
+import { CreateConfirmPanel } from '../components/jobs/CreateConfirmPanel'
+import { VisualStyleGallery } from '../components/jobs/VisualStyleGallery'
 import { ColorPaletteStrip } from '../components/jobs/ColorPaletteStrip'
 import { ImageStrategyCards } from '../components/jobs/ImageStrategyCards'
 import {
@@ -22,8 +23,6 @@ import {
   ICON_STRATEGY_OPTIONS,
   LANGUAGE_OPTIONS,
   MODE_OPTIONS,
-  PAGE_COUNT_MAX,
-  PAGE_COUNT_MIN,
   SCENARIO_OPTIONS,
   TONE_OPTIONS,
   type JobOptions,
@@ -65,14 +64,6 @@ function OptionSelect<T extends string>({
   )
 }
 
-const PAGE_COUNT_OPTIONS = Array.from(
-  { length: PAGE_COUNT_MAX - PAGE_COUNT_MIN + 1 },
-  (_, i) => {
-    const n = PAGE_COUNT_MIN + i
-    return { value: String(n), label: `${n} 页` }
-  },
-)
-
 type CreateMode = 'topic' | 'document'
 
 const PANEL_CLASS =
@@ -81,10 +72,13 @@ const PANEL_CLASS =
 const SECTION_HEADER =
   'flex w-full items-center justify-between text-left text-sm font-medium text-slate-700 dark:text-slate-200'
 
+const CONFIRM_SECTION_ID = 'create-confirm-plan'
+
 export function NewJobPage() {
   const quota = useAuthStore((s) => s.quota)
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const confirmRef = useRef<HTMLElement | null>(null)
 
   const [projectName, setProjectName] = useState('')
   const [options, setOptions] = useState<JobOptions>(DEFAULT_JOB_OPTIONS)
@@ -94,31 +88,48 @@ export function NewJobPage() {
   const [files, setFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [autoFilling, setAutoFilling] = useState(false)
+  const [planConfirmed, setPlanConfirmed] = useState(false)
 
-  // 内容输入模式 + 分节折叠状态
   const [mode, setMode] = useState<CreateMode>('topic')
   const [openTone, setOpenTone] = useState(false)
   const [openImagery, setOpenImagery] = useState(false)
   const [openAdvanced, setOpenAdvanced] = useState(false)
 
-  const canSubmit = useMemo(
+  const prerequisitesOk = useMemo(
     () =>
-      !submitting &&
-      !autoFilling &&
       quota() > 0 &&
       coreTopic.trim().length > 0 &&
       (mode === 'topic' || files.length > 0),
-    [submitting, autoFilling, quota, coreTopic, mode, files],
+    [quota, coreTopic, mode, files],
   )
 
-  const set = <K extends keyof JobOptions>(key: K, v: JobOptions[K]) =>
-    setOptions((o) => ({ ...o, [key]: v }))
+  const canStart = useMemo(
+    () => prerequisitesOk && planConfirmed && !submitting && !autoFilling,
+    [prerequisitesOk, planConfirmed, submitting, autoFilling],
+  )
 
-  // 智能填充成功后自动展开 ②
-  const onAutoFillSuccess = () => setOpenTone(true)
+  const set = <K extends keyof JobOptions>(key: K, v: JobOptions[K]) => {
+    setOptions((o) => ({ ...o, [key]: v }))
+    setPlanConfirmed(false)
+  }
+
+  const scrollToSection = (id: string) => {
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  const scrollToConfirm = () => scrollToSection(CONFIRM_SECTION_ID)
+
+  const onAutoFillSuccess = () => {
+    setOpenTone(true)
+    setOpenImagery(true)
+    setPlanConfirmed(false)
+    scrollToConfirm()
+  }
 
   const submit = async () => {
-    if (!canSubmit) return
+    if (!canStart) return
     setSubmitting(true)
     try {
       const fd = new FormData()
@@ -145,7 +156,7 @@ export function NewJobPage() {
       fd.append('split_mode', options.split_mode ? 'true' : 'false')
       for (const f of files) fd.append('files', f, f.name)
       const job = await api<{ id: string }>('POST', '/api/jobs', fd)
-      notifySuccess('任务已创建，排队中…')
+      notifySuccess('已开始生成，请稍候…')
       invalidateDefaultModelCache()
       invalidateJobLists(qc)
       navigate(`/jobs/${job.id}`)
@@ -156,7 +167,6 @@ export function NewJobPage() {
     }
   }
 
-  // ── 智能填充（autofill 逻辑完全保留；改名为局部函数 + 加 onSuccess 钩子） ──
   const applySuggestedOptions = (raw: unknown) => {
     if (!raw || typeof raw !== 'object') return
     const s = raw as Record<string, unknown>
@@ -177,6 +187,7 @@ export function NewJobPage() {
       }
       return next
     })
+    setPlanConfirmed(false)
   }
 
   const applyStyle = (raw: unknown) => {
@@ -201,6 +212,7 @@ export function NewJobPage() {
       }
       return next
     })
+    setPlanConfirmed(false)
   }
 
   const onAutoFill = async () => {
@@ -241,7 +253,7 @@ export function NewJobPage() {
       applySuggestedOptions(resp.suggested_options)
       applyStyle(resp.style)
       const modelUsed = (resp.model_used as ModelInfo | undefined) ?? m
-      notifySuccess(`智能填充完成（${modelUsed.name ?? '模型'}）`)
+      notifySuccess(`方案预览已生成（${modelUsed.name ?? '模型'}），请在下方确认后开始`)
       onAutoFillSuccess()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -249,13 +261,13 @@ export function NewJobPage() {
       if (match) {
         try {
           const detail = JSON.parse(match[1])
-          notifyError(`智能填充失败：${detail.message ?? msg}`)
+          notifyError(`方案生成失败：${detail.message ?? msg}`)
           return
         } catch {
           /* fall through */
         }
       }
-      notifyError(`智能填充失败：${msg}`)
+      notifyError(`方案生成失败：${msg}`)
     } finally {
       setAutoFilling(false)
     }
@@ -264,20 +276,23 @@ export function NewJobPage() {
   const canAutoFill =
     !autoFilling && (mode === 'topic' ? coreTopic.trim().length > 0 : files.length > 0)
 
-  // AI 提示气泡：仅当 core_topic 命中关键词时显示
   const hint = pickHint(coreTopic)
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">创建任务</h1>
+        <div>
+          <h1 className="text-xl font-semibold">创建 PPT</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            先确认大纲与风格，再开始生成；提交后自动完成，中途无法修改设置。
+          </p>
+        </div>
         <Link to="/" className="text-sm text-slate-500 hover:text-gemini-600">
           取消
         </Link>
       </div>
 
       <div className="space-y-4">
-        {/* ── ① 内容源（始终展开） ── */}
         <section className={PANEL_CLASS}>
           <button
             type="button"
@@ -298,7 +313,6 @@ export function NewJobPage() {
               />
             </label>
 
-            {/* 模式切换 */}
             <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-700">
               {(['topic', 'document'] as const).map((m) => (
                 <button
@@ -317,8 +331,8 @@ export function NewJobPage() {
             </div>
             <p className="text-xs text-slate-400">
               {mode === 'topic'
-                ? '输入一句话主题，AI 据此生成整套方案。'
-                : '上传文档作为素材，AI 解析文档后提炼主题并生成整套方案。'}
+                ? '输入主题后生成方案预览，在下方确认大纲再开始。'
+                : '上传文档后生成方案预览，在下方确认大纲再开始。'}
             </p>
 
             {mode === 'document' && (
@@ -328,13 +342,13 @@ export function NewJobPage() {
             <div>
               <span className="text-xs text-slate-500">
                 核心主题 <span className="text-rose-500">*</span>
-                {mode === 'document' && (
-                  <span className="ml-1 text-slate-400">（可点下方智能填充自动提取，也可手动编辑）</span>
-                )}
               </span>
               <textarea
                 value={coreTopic}
-                onChange={(e) => setCoreTopic(e.target.value)}
+                onChange={(e) => {
+                  setCoreTopic(e.target.value)
+                  setPlanConfirmed(false)
+                }}
                 rows={4}
                 className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
                 placeholder="一句话描述这个 PPT 的主题。例：介绍我们的新产品 X，面向企业客户，核心是提升效率。"
@@ -352,28 +366,20 @@ export function NewJobPage() {
               className="w-full rounded-md border border-gemini-300 bg-gemini-50 px-3 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-100 disabled:opacity-50 dark:border-gemini-700 dark:bg-gemini-950 dark:text-gemini-200 dark:hover:bg-gemini-900"
             >
               {autoFilling
-                ? '智能填充中…'
+                ? '正在生成方案预览…'
                 : mode === 'topic'
-                  ? '✨ 智能填充（基于主题生成大纲 / 重点 / 设置 / 风格）'
-                  : '✨ 智能填充（解析文档，生成主题 / 大纲 / 重点 / 设置 / 风格）'}
+                  ? '✨ 生成方案预览（大纲 / 重点 / 风格建议）'
+                  : '✨ 生成方案预览（解析文档并生成大纲）'}
             </button>
 
             <div>
-              <span className="text-xs text-slate-500">章节大纲（每行一个标题）</span>
-              <textarea
-                value={outlineText}
-                onChange={(e) => setOutlineText(e.target.value)}
-                rows={5}
-                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
-                placeholder={'封面\n第一章 背景与挑战\n第二章 解决方案\n第三章 实施路径\n第四章 预期收益\n总结'}
-              />
-            </div>
-
-            <div>
-              <span className="text-xs text-slate-500">重点强调（每行一个要点）</span>
+              <span className="text-xs text-slate-500">重点强调（每行一个要点，可选）</span>
               <textarea
                 value={keyPointsText}
-                onChange={(e) => setKeyPointsText(e.target.value)}
+                onChange={(e) => {
+                  setKeyPointsText(e.target.value)
+                  setPlanConfirmed(false)
+                }}
                 rows={3}
                 className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800"
                 placeholder={'用户增长 40%\nNPS 突破 60\n节省成本 30%'}
@@ -382,8 +388,7 @@ export function NewJobPage() {
           </div>
         </section>
 
-        {/* ── ② 视觉调性（默认折叠） ── */}
-        <section className={PANEL_CLASS}>
+        <section id="create-visual-tone" className={PANEL_CLASS}>
           <button
             type="button"
             onClick={() => setOpenTone((v) => !v)}
@@ -394,7 +399,6 @@ export function NewJobPage() {
           </button>
           {openTone && (
             <div className="mt-3 space-y-4">
-              {/* 5 个基础字段（从 ① 移过来） */}
               <div>
                 <span className="text-xs text-slate-500">基础设置</span>
                 <div className="mt-1 flex flex-wrap items-end gap-x-4 gap-y-2">
@@ -402,34 +406,21 @@ export function NewJobPage() {
                   <OptionSelect label="场景" options={SCENARIO_OPTIONS} value={options.scenario} onChange={(v) => set('scenario', v)} className="flex-1 min-w-[7rem]" />
                   <OptionSelect label="受众" options={AUDIENCE_OPTIONS} value={options.audience} onChange={(v) => set('audience', v)} className="flex-1 min-w-[7rem]" />
                   <OptionSelect label="语调" options={TONE_OPTIONS} value={options.tone} onChange={(v) => set('tone', v)} className="flex-1 min-w-[6rem]" />
-                  <label className="flex w-20 flex-none flex-col gap-0.5">
-                    <span className="text-xs text-slate-500">页数</span>
-                    <select
-                      value={String(options.page_count)}
-                      onChange={(e) => set('page_count', parseInt(e.target.value, 10) as JobOptions['page_count'])}
-                      className={SELECT_CLASS}
-                    >
-                      {PAGE_COUNT_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
               </div>
 
-              {/* 视觉风格 chip 网格 */}
               <div>
                 <span className="text-xs text-slate-500">视觉风格</span>
                 <div className="mt-1">
-                  <VisualStyleChips
+                  <VisualStyleGallery
                     value={(options.visual_style ?? 'auto') as JobVisualStyle}
                     onChange={(v) => set('visual_style', v)}
                     coreTopic={coreTopic}
+                    scenario={options.scenario}
                   />
                 </div>
               </div>
 
-              {/* 配色 */}
               <div>
                 <span className="text-xs text-slate-500">配色</span>
                 <div className="mt-1">
@@ -447,8 +438,7 @@ export function NewJobPage() {
           )}
         </section>
 
-        {/* ── ③ 素材策略（默认折叠） ── */}
-        <section className={PANEL_CLASS}>
+        <section id="create-imagery" className={PANEL_CLASS}>
           <button
             type="button"
             onClick={() => setOpenImagery((v) => !v)}
@@ -470,7 +460,6 @@ export function NewJobPage() {
           )}
         </section>
 
-        {/* ── 高级（底部齿轮） ── */}
         <div>
           <button
             type="button"
@@ -490,11 +479,19 @@ export function NewJobPage() {
               </div>
               <div className="flex flex-wrap items-center gap-5 text-sm">
                 <label className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={options.include_speaker_notes} onChange={(e) => set('include_speaker_notes', e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={options.include_speaker_notes}
+                    onChange={(e) => set('include_speaker_notes', e.target.checked)}
+                  />
                   <span>生成演讲者备注</span>
                 </label>
                 <label className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={options.split_mode} onChange={(e) => set('split_mode', e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={options.split_mode}
+                    onChange={(e) => set('split_mode', e.target.checked)}
+                  />
                   <span>长 deck 分阶段模式</span>
                 </label>
               </div>
@@ -506,14 +503,31 @@ export function NewJobPage() {
           <p className="text-sm text-rose-600">Credits 不足，无法创建任务</p>
         )}
 
-        <button
-          type="button"
-          disabled={!canSubmit}
-          onClick={submit}
-          className="w-full rounded-md bg-gemini-600 py-2.5 text-sm font-medium text-white hover:bg-gemini-700 disabled:opacity-50"
-        >
-          {submitting ? '提交中…' : '创建任务'}
-        </button>
+        <CreateConfirmPanel
+          id={CONFIRM_SECTION_ID}
+          ref={confirmRef}
+          pageCount={options.page_count}
+          onPageCountChange={(n) => set('page_count', n)}
+          outlineText={outlineText}
+          onOutlineChange={(v) => {
+            setOutlineText(v)
+            setPlanConfirmed(false)
+          }}
+          options={options}
+          confirmed={planConfirmed}
+          onConfirmedChange={setPlanConfirmed}
+          onExpandTone={() => {
+            setOpenTone(true)
+            scrollToSection('create-visual-tone')
+          }}
+          onExpandImagery={() => {
+            setOpenImagery(true)
+            scrollToSection('create-imagery')
+          }}
+          submitting={submitting}
+          canStart={canStart}
+          onStart={submit}
+        />
       </div>
     </div>
   )

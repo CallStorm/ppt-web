@@ -21,14 +21,38 @@ def _is_sqlite() -> bool:
     return DB_URL.startswith("sqlite")
 
 
-_connect_args: dict = {"check_same_thread": False} if _is_sqlite() else {}
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
-engine = create_engine(
-    DB_URL,
-    connect_args=_connect_args,
-    future=True,
-    pool_pre_ping=True,
-)
+
+def _engine_kwargs() -> dict:
+    kwargs: dict = {
+        "future": True,
+        "pool_pre_ping": True,
+    }
+    if _is_sqlite():
+        kwargs["connect_args"] = {"check_same_thread": False}
+        # SQLite: single file — avoid QueuePool contention under burst writes.
+        kwargs["poolclass"] = __import__(
+            "sqlalchemy.pool", fromlist=["StaticPool"]
+        ).StaticPool
+    else:
+        # MySQL default pool (5 + 10 overflow) is too small for concurrent
+        # jobs + SSE + high-frequency event inserts.
+        kwargs["pool_size"] = _env_int("DB_POOL_SIZE", 10)
+        kwargs["max_overflow"] = _env_int("DB_MAX_OVERFLOW", 20)
+        kwargs["pool_timeout"] = _env_int("DB_POOL_TIMEOUT", 60)
+        kwargs["pool_recycle"] = _env_int("DB_POOL_RECYCLE", 3600)
+    return kwargs
+
+
+engine = create_engine(DB_URL, **_engine_kwargs())
 
 
 if _is_sqlite():
@@ -51,3 +75,21 @@ def init_db() -> None:
 
 def get_session() -> Session:
     return SessionLocal()
+
+
+def pool_status() -> dict[str, int | str]:
+    """Best-effort pool stats for logging / admin diagnostics."""
+    pool = engine.pool
+    backend = pool.__class__.__name__
+    if backend == "StaticPool":
+        return {"backend": backend}
+    try:
+        return {
+            "backend": backend,
+            "size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"backend": backend, "error": str(exc)}

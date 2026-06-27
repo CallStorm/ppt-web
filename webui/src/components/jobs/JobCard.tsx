@@ -21,7 +21,10 @@ export function JobCard({
   const hasPptx = !!job.pptx_path
   const isDone = job.status === 'done'
   const showDownload = isDone && hasPptx
-  const canRetry = job.status === 'failed' || job.status === 'cancelled'
+  const canRetry =
+    job.status === 'failed' ||
+    job.status === 'cancelled' ||
+    (job.status === 'paused' && !job.session_id)
   const deleteJob = useDeleteJob()
   const retryJob = useRetryJob()
   const [menuOpen, setMenuOpen] = useState(false)

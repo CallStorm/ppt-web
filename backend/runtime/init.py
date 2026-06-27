@@ -7,6 +7,7 @@ import logging
 from backend.db.session import SessionLocal, init_db
 from backend.models import Job as DbJob
 from backend.runtime import state
+from backend.runtime.events import start_event_writer
 from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runtime.init")
@@ -15,6 +16,7 @@ log = logging.getLogger("backend.runtime.init")
 def init_runtime() -> None:
     """在 event loop 里调用一次：建表 + 建 asyncio.Event。"""
     init_db()
+    start_event_writer()
     if state._dispatcher_event is None:
         state._dispatcher_event = asyncio.Event()
 

@@ -237,7 +237,10 @@ async def resume_job_endpoint(
         if j.status != "paused":
             raise HTTPException(400, f"job status is {j.status}, can only resume paused jobs")
         if not j.session_id:
-            raise HTTPException(400, "no session_id to resume")
+            raise HTTPException(
+                400,
+                "会话已丢失，无法继续确认；请删除该任务后重新创建，或对已失败任务使用重试",
+            )
         j.status = "queued"
         s.commit()
     queue_resume(job_id, confirm_text)
@@ -256,9 +259,13 @@ async def retry_job_endpoint(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = get_job_or_404(s, job_id)
         require_owner_or_admin(j, user)
-        if j.status not in ("failed", "cancelled"):
+        if j.status not in ("failed", "cancelled", "paused"):
             raise HTTPException(
-                409, f"job status is {j.status}, can only retry failed/cancelled jobs"
+                409, f"job status is {j.status}, can only retry failed/cancelled/stale paused jobs"
+            )
+        if j.status == "paused" and j.session_id:
+            raise HTTPException(
+                409, "任务仍在等待确认，请提交确认或先取消，不能重试",
             )
         if not j.user_id:
             raise HTTPException(400, "job has no owner to charge")
@@ -301,6 +308,15 @@ async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
             if j2.status == "queued":
                 j2.status = "cancelled"
                 j2.error_message = "user cancelled"
+                s.commit()
+        return {"id": job_id, "status": "cancelled"}
+    if j.status == "paused" and not is_active(job_id):
+        with SessionLocal() as s:
+            j2 = get_job_or_404(s, job_id)
+            require_owner_or_admin(j2, user)
+            if j2.status == "paused":
+                j2.status = "cancelled"
+                j2.error_message = j2.error_message or "user cancelled"
                 s.commit()
         return {"id": job_id, "status": "cancelled"}
     if not is_active(job_id):
@@ -567,7 +583,7 @@ async def delete_job(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = get_job_or_404(s, job_id)
         require_owner_or_admin(j, user)
-        if j.status in ("running", "paused"):
+        if j.status == "running" or (j.status == "paused" and is_active(job_id)):
             raise HTTPException(400, "cannot delete a running job; cancel it first")
         user_id = j.user_id
 
@@ -577,7 +593,7 @@ async def delete_job(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = get_job_or_404(s, job_id)
         require_owner_or_admin(j, user)
-        if j.status in ("running", "paused"):
+        if j.status == "running" or (j.status == "paused" and is_active(job_id)):
             raise HTTPException(400, "cannot delete a running job; cancel it first")
         s.query(Event).filter(Event.job_id == job_id).delete()
         s.delete(j)

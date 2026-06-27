@@ -1,0 +1,549 @@
+{
+  "version": 2,
+  "styles": [
+    {
+      "id": "auto",
+      "category": "auto",
+      "title": "AI 智能感知",
+      "tagline": "根据主题与场景自动匹配风格",
+      "character": "不锁定单一美学，由 AI 结合内容与场景选择最合适的视觉风格。",
+      "bestFor": ["不确定用哪种风格", "主题跨度大", "希望省心交给 AI"],
+      "notFor": "需要严格品牌手册或固定模板时，建议手动选定一种风格。",
+      "traits": [
+        { "label": "形状", "text": "随所选风格变化" },
+        { "label": "留白", "text": "随所选风格变化" },
+        { "label": "层次", "text": "随所选风格变化" }
+      ],
+      "pairedRendering": null,
+      "colorHint": null,
+      "rules": [],
+      "exampleProjectId": null,
+      "exampleFolder": null,
+      "previewSlides": null,
+      "collageStyles": ["swiss-minimal", "editorial", "ink-wash", "zine"]
+    },
+    {
+      "id": "swiss-minimal",
+      "category": "corporate",
+      "title": "瑞士极简",
+      "tagline": "网格严谨 · 大量留白 · 几乎无装饰",
+      "character": "网格锁定、锐利几何、刻意留白，装饰趋近于零。",
+      "bestFor": ["高端咨询", "建筑与设计", "文字主导的严肃汇报"],
+      "notFor": "需要热闹营销感或大量插画的场合。",
+      "traits": [
+        { "label": "形状", "text": "直角矩形与细线，圆角极小或不用" },
+        { "label": "留白", "text": "宽边距与大块负空间，版面克制" },
+        { "label": "层次", "text": "严格扁平，无阴影与材质" }
+      ],
+      "pairedRendering": "minimalist-swiss",
+      "colorHint": "近白底 + 极少单色强调（mono-ink / editorial-classic 气质）；禁止科技蓝渐变与大面积摄影 hero",
+      "rules": [
+        "rx=\"0\" 默认；禁止 linear/radial gradient、drop shadow、filter",
+        "严格扁平 2D，无材质与立体",
+        "accent 仅占画布极小比例；字段以近白为主",
+        "禁止默认全出血摄影 hero + scrim 封面",
+        "布局对齐模块化网格，左对齐标题层级"
+      ],
+      "exampleProjectId": "ppt169_swiss_grid_systems",
+      "exampleFolder": "ppt169_swiss_grid_systems/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_principles.svg",
+        "closing": "14_closing.svg"
+      }
+    },
+    {
+      "id": "soft-rounded",
+      "category": "corporate",
+      "title": "柔圆亲和",
+      "tagline": "圆角卡片 · 轻阴影 · 友好易读",
+      "character": "圆角卡片、温和 elevation 与亲切节奏，ToC 与教育场景友好。",
+      "bestFor": ["产品培训", "SaaS 功能介绍", "消费者与教育受众"],
+      "notFor": "需要严肃报刊密度或硬核工程线稿时。",
+      "traits": [
+        { "label": "形状", "text": "大圆角卡片与胶囊标签" },
+        { "label": "留白", "text": "卡片内舒适 padding" },
+        { "label": "层次", "text": "轻阴影悬浮卡片" }
+      ],
+      "pairedRendering": "flat",
+      "colorHint": "暖色或柔和中性色；可适度使用品牌色块，避免冷硬科技蓝",
+      "rules": [
+        "大圆角卡片（rx 12–24）与胶囊标签",
+        "轻 elevation 阴影，层次来自卡片而非渐变",
+        "友好节奏与充足 padding",
+        "封面可用插图但保持圆角容器结构"
+      ],
+      "exampleProjectId": "ppt169_soft_rounded_demo",
+      "exampleFolder": "ppt169_soft_rounded_demo/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "02_features.svg",
+        "closing": "01_cover.svg"
+      }
+    },
+    {
+      "id": "glassmorphism",
+      "category": "corporate",
+      "title": "玻璃拟态",
+      "tagline": "毛玻璃面板 · 渐变光感 · 悬浮层次",
+      "character": "半透明玻璃卡片、柔和渐变与浮动深度，现代 SaaS 气质。",
+      "bestFor": ["现代 SaaS", "金融科技", "产品发布与 AI 演示"],
+      "notFor": "需要印刷感或高密度文字报刊版面时。",
+      "traits": [
+        { "label": "形状", "text": "圆角玻璃面板与柔和容器" },
+        { "label": "留白", "text": "深色底上的呼吸感分区" },
+        { "label": "层次", "text": "半透明叠层与轻阴影" }
+      ],
+      "pairedRendering": "glassmorphism",
+      "colorHint": "深色底 + 柔和渐变光感（dark-cinematic / tech-neon 气质）",
+      "rules": [
+        "半透明玻璃面板（fill-opacity + 轻 blur 感）叠在渐变背景上",
+        "圆角容器与浮动层次",
+        "背景可用渐变但 UI 元素保持玻璃质感",
+        "封面与内容页共用同一深色场域与 accent"
+      ],
+      "exampleProjectId": "ppt169_glassmorphism_demo",
+      "exampleFolder": "ppt169_glassmorphism_demo/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_agent_architecture.svg",
+        "closing": "12_cta_closing.svg"
+      }
+    },
+    {
+      "id": "dark-tech",
+      "category": "corporate",
+      "title": "深色科技",
+      "tagline": "深色画布 · 发光强调 · 几何精准",
+      "character": "深色背景配合霓虹强调线与数据面板感，适合技术叙事。",
+      "bestFor": ["技术发布", "AI / 开发者产品", "数据与架构讲解"],
+      "notFor": "需要明亮印刷风或儿童向亲和界面时。",
+      "traits": [
+        { "label": "形状", "text": "利落几何块与连接线" },
+        { "label": "留白", "text": "深色场域中的分区留白" },
+        { "label": "层次", "text": "发光描边与面板明暗对比" }
+      ],
+      "pairedRendering": "digital-dashboard",
+      "colorHint": "深底 + 高亮 accent（tech-neon / dark-cinematic）；避免明亮白底",
+      "rules": [
+        "深色画布为默认底色",
+        "发光描边或高亮 accent 线强调结构",
+        "几何精准、面板化分区",
+        "全 deck 保持同一深色场与 accent，封面不得单独换浅色"
+      ],
+      "exampleProjectId": "ppt169_building_effective_agents",
+      "exampleFolder": "ppt169_building_effective_agents/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_augmented_llm.svg",
+        "closing": "12_summary.svg"
+      }
+    },
+    {
+      "id": "blueprint",
+      "category": "corporate",
+      "title": "蓝图",
+      "tagline": "工程线稿 · 等距示意 · 标注清晰",
+      "character": "深色纸面上的 schematic 线稿与等距结构，工程简报气质。",
+      "bestFor": ["工程方案", "系统架构", "技术 walkthrough"],
+      "notFor": "消费品牌或需要大图摄影主导的场合。",
+      "traits": [
+        { "label": "形状", "text": "线框、网格与等距块" },
+        { "label": "留白", "text": "图纸式分区与标注区" },
+        { "label": "层次", "text": "线稿为主，色块点缀" }
+      ],
+      "pairedRendering": "blueprint",
+      "colorHint": "深蓝/深灰纸面 + 线稿蓝或青 accent（editorial-classic 线稿感）",
+      "rules": [
+        "schematic 线稿与等距块为主",
+        "深色纸面底 + 细线标注",
+        "色块仅作点缀，信息靠线框承载",
+        "封面可用系统总览线稿，与内容页同一图纸色"
+      ],
+      "exampleProjectId": "ppt169_kubernetes_blueprint_2026",
+      "exampleFolder": "ppt169_kubernetes_blueprint_2026/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "03_control_plane.svg",
+        "closing": "10_takeaways.svg"
+      }
+    },
+    {
+      "id": "editorial",
+      "category": "editorial",
+      "title": "编辑设计",
+      "tagline": "杂志栏栅 · 标题层级 · 内容型长读",
+      "character": "杂志式标题层级、分栏与规则线，适合深度内容阅读。",
+      "bestFor": ["财经分析", "深度报道", "说明型长文演示"],
+      "notFor": "纯数据仪表盘或强游戏化视觉。",
+      "traits": [
+        { "label": "形状", "text": "分栏线与标题装饰条" },
+        { "label": "留白", "text": "栏栅节奏，段落分明" },
+        { "label": "层次", "text": "以排版层级为主，装饰克制" }
+      ],
+      "pairedRendering": "editorial",
+      "colorHint": "经典编辑色（editorial-classic / cool-corporate）；黑白 + 单一 accent",
+      "rules": [
+        "杂志式标题层级与分栏",
+        "规则线与栏栅节奏",
+        "装饰克制，层次靠排版",
+        "封面与内容共用同一栏栅与配色体系"
+      ],
+      "exampleProjectId": "ppt169_high_rise_renewal",
+      "exampleFolder": "ppt169_high_rise_renewal/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "07_quay_quarter.svg",
+        "closing": "15_ending.svg"
+      }
+    },
+    {
+      "id": "photo-editorial",
+      "category": "editorial",
+      "title": "图册编辑",
+      "tagline": "大图出血 · 摄影主导 · 配文点睛",
+      "character": "全幅或出血摄影占主导，文字作点缀与说明。",
+      "bestFor": ["建筑人文", "设计时尚", "文化类图文叙事"],
+      "notFor": "纯数据表格或密集小字报刊页。",
+      "traits": [
+        { "label": "形状", "text": "大图块与窄文字栏" },
+        { "label": "留白", "text": "画面留白与图幅优先" },
+        { "label": "层次", "text": "摄影景深为主，UI 元素轻" }
+      ],
+      "pairedRendering": "corporate-photo",
+      "colorHint": "摄影主导；UI 色块克制，与影像色调协调",
+      "rules": [
+        "大图出血或全幅摄影占主导",
+        "文字窄栏、标题点睛",
+        "UI 元素轻，不压过影像",
+        "封面与内容页摄影风格一致"
+      ],
+      "exampleProjectId": "ppt169_pritzker_2026",
+      "exampleFolder": "ppt169_pritzker_2026/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "03_ando.svg",
+        "closing": "11_epilogue.svg"
+      }
+    },
+    {
+      "id": "data-journalism",
+      "category": "editorial",
+      "title": "数据新闻",
+      "tagline": "多栏微图表 · 侧栏注释 · 高密度信息",
+      "character": "彭博 / 经济学人式多栏微图与侧栏，数据密集但有条理。",
+      "bestFor": ["市场回顾", "财经研报", "数据密集型年报"],
+      "notFor": "极简大图展示或儿童向圆润界面。",
+      "traits": [
+        { "label": "形状", "text": "小图块、侧栏与注释框" },
+        { "label": "留白", "text": "紧凑但分栏清晰" },
+        { "label": "层次", "text": "图表与文字层叠编排" }
+      ],
+      "pairedRendering": "editorial",
+      "colorHint": "高密度信息色（cool-corporate / mono-ink）；图表色与正文色统一",
+      "rules": [
+        "多栏微图表与侧栏注释",
+        "信息密度高但分栏清晰",
+        "来源线与数据标注规范",
+        "封面可用数据氛围图但保持报刊密度"
+      ],
+      "exampleProjectId": "ppt169_global_ai_capital_2026",
+      "exampleFolder": "ppt169_global_ai_capital_2026/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_q1_vc_landscape.svg",
+        "closing": "20_closing.svg"
+      }
+    },
+    {
+      "id": "brutalist",
+      "category": "editorial",
+      "title": "粗野主义",
+      "tagline": "报章密度 · 粗框结构 · 单色强调",
+      "character": "报刊式密集排版、粗框分区与原始结构感，信息量大。",
+      "bestFor": ["年报综述", "研究摘要", "宣言式重磅发布"],
+      "notFor": "需要温柔亲和或大量圆角卡片的产品介绍。",
+      "traits": [
+        { "label": "形状", "text": "粗边框与硬切分区" },
+        { "label": "留白", "text": "紧凑栏栅，信息密度高" },
+        { "label": "层次", "text": "扁平印刷感，少立体" }
+      ],
+      "pairedRendering": "screen-print",
+      "colorHint": "高对比单色 + 粗黑框；避免柔和渐变",
+      "rules": [
+        "粗边框与硬切分区",
+        "报刊密度、扁平印刷感",
+        "高对比单色强调",
+        "封面与内容保持同一粗框结构语言"
+      ],
+      "exampleProjectId": "ppt169_brutalist_ai_newspaper_2026",
+      "exampleFolder": "ppt169_brutalist_ai_newspaper_2026/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "03_revenue_league.svg",
+        "closing": "10_closing_read.svg"
+      }
+    },
+    {
+      "id": "memphis",
+      "category": "expressive",
+      "title": "孟菲斯",
+      "tagline": "撞色几何 · 波普装饰 · 活力营销",
+      "character": "高饱和色块、几何 confetti 与粗轮廓，节庆与营销感强。",
+      "bestFor": ["创意营销", "音乐节与活动", "年轻化品牌发布"],
+      "notFor": "严肃金融研报或极简咨询风。",
+      "traits": [
+        { "label": "形状", "text": "几何拼贴与粗描边" },
+        { "label": "留白", "text": "装饰填满但节奏跳跃" },
+        { "label": "层次", "text": "扁平色块叠放" }
+      ],
+      "pairedRendering": "flat",
+      "colorHint": "高饱和撞色（vivid-launch / jewel-tone）；全 deck 保持活泼一致",
+      "rules": [
+        "高饱和色块与几何 confetti",
+        "粗轮廓、扁平叠放",
+        "装饰性强但保持可读层级",
+        "封面与内容共用同一撞色体系"
+      ],
+      "exampleProjectId": "ppt169_sugar_rush_memphis",
+      "exampleFolder": "ppt169_sugar_rush_memphis/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "03_numbers.svg",
+        "closing": "14_closing.svg"
+      }
+    },
+    {
+      "id": "zine",
+      "category": "expressive",
+      "title": "独立杂志",
+      "tagline": "Riso 错位 · 半色调 · 印刷颗粒感",
+      "character": "独立出版与 riso 印刷气质：错位套色、半色调与有限色板。",
+      "bestFor": ["文化沙龙", "设计分享", "独立品牌"],
+      "notFor": "严肃企业年报或极简咨询风。",
+      "traits": [
+        { "label": "形状", "text": "手工裁贴与半色调块" },
+        { "label": "留白", "text": "印刷留白与颗粒纹理" },
+        { "label": "层次", "text": "套色错位与网点" }
+      ],
+      "pairedRendering": "screen-print",
+      "colorHint": "有限色板 + 印刷颗粒（duotone / vivid-launch 变体）",
+      "rules": [
+        "Riso 错位套色与半色调",
+        "有限色板，印刷颗粒感",
+        "手工裁贴式构图",
+        "封面与内容保持同一印刷色板"
+      ],
+      "exampleProjectId": "ppt169_indie_bookstore_zine_guide",
+      "exampleFolder": "ppt169_indie_bookstore_zine_guide/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_zine_history.svg",
+        "closing": "18_outro.svg"
+      }
+    },
+    {
+      "id": "vintage-poster",
+      "category": "expressive",
+      "title": "复古海报",
+      "tagline": "中古色块 · 半色调 · 复古几何",
+      "character": "中世纪平面海报感：扁平色块、半色调与复古几何温暖气质。",
+      "bestFor": ["老字号", "文旅 heritage", "周年庆典"],
+      "notFor": "现代 SaaS 或极简科技发布。",
+      "traits": [
+        { "label": "形状", "text": "复古几何与半色调块" },
+        { "label": "留白", "text": "海报式构图" },
+        { "label": "层次", "text": "扁平色块叠压" }
+      ],
+      "pairedRendering": "vintage-poster",
+      "colorHint": "duotone 或暖复古色（warm-earth / earthy-dusty）",
+      "rules": [
+        "中古扁平色块与半色调",
+        "复古几何构图",
+        "温暖怀旧色板",
+        "封面大字海报式，与内容色板一致"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "12_竖版杂志.svg",
+        "content": "14_褪色底图大字.svg",
+        "closing": "14_褪色底图大字.svg"
+      }
+    },
+    {
+      "id": "paper-cut",
+      "category": "expressive",
+      "title": "剪纸层叠",
+      "tagline": "纸层阴影 · 手工质感 · 文化民俗",
+      "character": "多层剪纸叠放、层间柔和阴影，民俗与文化主题友好。",
+      "bestFor": ["文化节庆", "儿童教育", "可持续与民俗主题"],
+      "notFor": "硬核技术架构或深色科技风。",
+      "traits": [
+        { "label": "形状", "text": "分层纸形与柔和投影" },
+        { "label": "留白", "text": "层叠景深" },
+        { "label": "层次", "text": "纸层间阴影" }
+      ],
+      "pairedRendering": "paper-cut",
+      "colorHint": "自然有机色（nature-organic / warm-earth）",
+      "rules": [
+        "多层剪纸形与层间柔和阴影",
+        "手工质感、有机轮廓",
+        "色板偏自然有机",
+        "封面与内容保持同一纸层语言"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "11_剪纸分层.svg",
+        "content": "11_剪纸分层.svg",
+        "closing": "11_剪纸分层.svg"
+      }
+    },
+    {
+      "id": "sketch-notes",
+      "category": "hand-drawn",
+      "title": "手绘速写",
+      "tagline": "暖纸底 · 涂鸦线条 · 柔和色块",
+      "character": "暖色纸面、手绘涂鸦线与柔和 pastel 块，教学友好。",
+      "bestFor": ["教育培训", "onboarding", "知识分享"],
+      "notFor": "严肃金融研报或深色科技发布。",
+      "traits": [
+        { "label": "形状", "text": "手绘线框与涂鸦" },
+        { "label": "留白", "text": "暖纸底呼吸感" },
+        { "label": "层次", "text": "柔和 pastel 块" }
+      ],
+      "pairedRendering": "sketch-notes",
+      "colorHint": "暖纸 + 马卡龙 pastel（macaron / warm-earth）",
+      "rules": [
+        "暖色纸底与手绘涂鸦线",
+        "柔和 pastel 色块",
+        "线条不完全规整，教学亲切感",
+        "封面与内容保持同一手绘温度"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "06_底图浮文.svg",
+        "content": "06_底图浮文.svg",
+        "closing": "06_底图浮文.svg"
+      }
+    },
+    {
+      "id": "ink-notes",
+      "category": "hand-drawn",
+      "title": "墨笔记",
+      "tagline": "淡底 · 手墨线条 · 稀疏强调",
+      "character": "淡色场、黑色手墨线条与稀疏语义 accent，方法论与宣言感。",
+      "bestFor": ["方法论", "前后对比", "宣言式短演示"],
+      "notFor": "高密度数据报刊或霓虹科技风。",
+      "traits": [
+        { "label": "形状", "text": "手墨线与不规整块" },
+        { "label": "留白", "text": "大量淡底留白" },
+        { "label": "层次", "text": "墨线为主" }
+      ],
+      "pairedRendering": "ink-notes",
+      "colorHint": "淡底 + 墨黑主色（earthy-dusty / mono-ink 变体）",
+      "rules": [
+        "淡色场 + 黑色手墨线条",
+        "稀疏 accent，不堆砌装饰",
+        "大字叠压或墨线为主构图",
+        "封面与结尾保持同一墨笔记气质"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "14_褪色底图大字.svg",
+        "content": "14_褪色底图大字.svg",
+        "closing": "14_褪色底图大字.svg"
+      }
+    },
+    {
+      "id": "chalkboard",
+      "category": "hand-drawn",
+      "title": "黑板粉笔",
+      "tagline": "深色板面 · 粉笔笔触 · 粉彩强调",
+      "character": "深色 slate 底、粉笔笔触与粉状 pastel accent，课堂感强。",
+      "bestFor": ["课堂教学", "教程讲解", "学术讲堂"],
+      "notFor": "企业品牌发布或大图摄影主导。",
+      "traits": [
+        { "label": "形状", "text": "粉笔线与不规整笔触" },
+        { "label": "留白", "text": "板面分区" },
+        { "label": "层次", "text": "粉笔粉质感" }
+      ],
+      "pairedRendering": "chalkboard",
+      "colorHint": "深绿/深灰板面 + 粉笔白（mono-ink 板面变体）",
+      "rules": [
+        "深色板面底 + 粉笔白线条",
+        "粉状 pastel accent 点缀",
+        "笔触不完全规整",
+        "封面与结尾保持同一板面色"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "20_黑板收场.svg",
+        "content": "20_黑板收场.svg",
+        "closing": "20_黑板收场.svg"
+      }
+    },
+    {
+      "id": "ink-wash",
+      "category": "hand-drawn",
+      "title": "水墨留白",
+      "tagline": "宣纸留白 · 笔意 · 新中式",
+      "character": "宣纸大面积留白、水墨笔意与印章式 accent，文化哲学气质。",
+      "bestFor": ["文化哲学", "heritage", "新中式主题"],
+      "notFor": "霓虹科技或孟菲斯营销风。",
+      "traits": [
+        { "label": "形状", "text": "笔意块面与留白" },
+        { "label": "留白", "text": "宣纸级大面积留白" },
+        { "label": "层次", "text": "水墨浓淡" }
+      ],
+      "pairedRendering": "ink-notes",
+      "colorHint": "水墨中性 + 大量留白（earthy-dusty / 水墨灰）",
+      "rules": [
+        "宣纸留白为主，水墨笔意点缀",
+        "印章式 sparse accent",
+        "禁止高饱和霓虹与硬边科技 UI",
+        "封面与结尾保持同一水墨灰度体系"
+      ],
+      "exampleProjectId": "ppt169_cangzhuo",
+      "exampleFolder": "ppt169_cangzhuo/svg_final",
+      "previewSlides": {
+        "cover": "01_cover.svg",
+        "content": "04_什么是藏拙.svg",
+        "closing": "14_结语.svg"
+      }
+    },
+    {
+      "id": "pixel-art",
+      "category": "specialty",
+      "title": "像素复古",
+      "tagline": "像素网格 · 块状造型 · 有限色板",
+      "character": "严格像素网格、块状造型与有限色板，游戏与复古科技感。",
+      "bestFor": ["游戏", "复古科技", "怀旧主题"],
+      "notFor": "严肃咨询或大图摄影编辑风。",
+      "traits": [
+        { "label": "形状", "text": "像素块与硬边" },
+        { "label": "留白", "text": "网格对齐" },
+        { "label": "层次", "text": "有限色板扁平" }
+      ],
+      "pairedRendering": "pixel-art",
+      "colorHint": "有限色板（vivid-launch / jewel-tone 像素变体）",
+      "rules": [
+        "严格像素网格与硬边块",
+        "有限色板，禁止平滑渐变",
+        "8-bit 复古造型语言",
+        "封面与内容保持同一像素色板"
+      ],
+      "exampleProjectId": "ppt169_image_text_showcase",
+      "exampleFolder": "ppt169_image_text_showcase/svg_final",
+      "previewSlides": {
+        "cover": "10_底纹密铺.svg",
+        "content": "10_底纹密铺.svg",
+        "closing": "10_底纹密铺.svg"
+      }
+    }
+  ]
+}

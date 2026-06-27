@@ -192,11 +192,15 @@ def run_sync(
         # auto-resume 检测到 snapshot 完全没变 → agent 在空转 / 撒谎。
         # 标 failed + 触发 refund（不是用户 prompt 的问题，是 server 没识别出 agent 异常）
         status = "failed"
-    elif stop_reason in STOP_OK:
-        # agent 主动停下但还没出 pptx = 暂停等确认
+    elif stop_reason in STOP_OK and session_id:
+        # agent 主动停下但还没出 pptx = 暂停等确认（必须有 session 才能 resume）
         status = "paused"
+    elif stop_reason in STOP_OK:
+        status = "failed"
     else:
         status = "failed"
+
+    orphan_paused = status == "failed" and stop_reason in STOP_OK and not session_id
 
     final = {
         "status": status,
@@ -207,8 +211,10 @@ def run_sync(
         "last_agent_text": last_text,
         "error_message": _humanize_run_error(
             None if status != "failed" else
-            ("auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated"
-             if no_progress_bail else f"stop_reason={stop_reason}"),
+            ("session lost: cannot resume confirmation"
+             if orphan_paused else
+             ("auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated"
+              if no_progress_bail else f"stop_reason={stop_reason}")),
             job_id,
         ),
         # run_job 看这个标志决定是否 refund credit
