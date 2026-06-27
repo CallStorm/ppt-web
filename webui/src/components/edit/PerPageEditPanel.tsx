@@ -1,4 +1,5 @@
 import type { EditTargetSlide, RevisionItem } from '../../api/types'
+import { AuthenticatedSlideImage } from '../jobs/AuthenticatedSlideImage'
 
 const MAX_COMMENT = 1000
 
@@ -27,11 +28,10 @@ export function PerPageEditPanel({
             </span>
           </div>
           <div className="bg-slate-100 dark:bg-slate-800/60">
-            <img
-              src={sl.image_url}
+            <AuthenticatedSlideImage
+              url={sl.image_url}
               alt={`第 ${sl.index} 页`}
               className="mx-auto block max-h-72 w-full object-contain"
-              loading="lazy"
             />
           </div>
           <div className="p-3">

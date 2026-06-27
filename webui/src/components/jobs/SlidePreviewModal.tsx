@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { downloadUrl } from '../../api/client'
 import { useJobSlideNotes, useJobSlides } from '../../hooks/useJobs'
+import { AuthenticatedSlideImage } from './AuthenticatedSlideImage'
 
 interface Props {
   jobId: string
@@ -128,11 +129,11 @@ export function SlidePreviewModal({ jobId, jobName, onClose }: Props) {
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="flex min-h-0 flex-1 items-center justify-center p-2">
                 {slide && (
-                  <img
-                    key={slide.index}
-                    src={slide.image_url}
+                  <AuthenticatedSlideImage
+                    url={slide.image_url}
                     alt={`第 ${current + 1} 页`}
                     className="max-h-full max-w-full rounded shadow-lg object-contain"
+                    loading="eager"
                   />
                 )}
               </div>
@@ -179,11 +180,10 @@ export function SlidePreviewModal({ jobId, jobName, onClose }: Props) {
                       : 'border-white/10 hover:border-white/30'
                   }`}
                 >
-                  <img
-                    src={sl.image_url}
+                  <AuthenticatedSlideImage
+                    url={sl.image_url}
                     alt={`缩略图 ${i + 1}`}
                     className="h-full w-full object-contain"
-                    loading="lazy"
                   />
                   <span className="absolute bottom-0 right-0 bg-black/60 px-1 text-[10px] text-white/80">
                     {i + 1}

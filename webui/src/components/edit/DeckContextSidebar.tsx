@@ -1,5 +1,6 @@
 import type { EditTargetSlide, SpecSummary } from '../../api/types'
 import { optionLabel, VISUAL_STYLE_OPTIONS } from '../../lib/jobOptions'
+import { AuthenticatedSlideImage } from '../jobs/AuthenticatedSlideImage'
 
 export function DeckContextSidebar({
   slides,
@@ -27,11 +28,10 @@ export function DeckContextSidebar({
               key={sl.index}
               className="shrink-0 overflow-hidden rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-900"
             >
-              <img
-                src={sl.image_url}
+              <AuthenticatedSlideImage
+                url={sl.image_url}
                 alt={`第 ${sl.index} 页`}
                 className="h-16 w-28 object-contain"
-                loading="lazy"
               />
               <div className="px-1 py-0.5 text-center text-[10px] text-slate-500">
                 {sl.index}

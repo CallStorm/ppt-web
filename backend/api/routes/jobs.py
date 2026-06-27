@@ -557,7 +557,11 @@ async def get_job_slide(job_id: str, slide_index: int, user: CurrentUser):
             f"slide {slide_index} has an invalid SVG namespace; "
             "re-run finalize_svg or click 'regenerate' to repair",
         )
-    return FileResponse(sl["path"], media_type=sl["media_type"])
+    return FileResponse(
+        sl["path"],
+        media_type=sl["media_type"],
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/{job_id}/slides/{slide_index}/notes")
