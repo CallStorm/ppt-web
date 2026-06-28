@@ -14,6 +14,23 @@ log = logging.getLogger("backend.db")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DB_PATH = PROJECT_ROOT / "jobs.db"
+
+
+def _load_dotenv_if_present() -> None:
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip()
+
+
+_load_dotenv_if_present()
 DB_URL = os.getenv("DB_URL", f"sqlite:///{DB_PATH}")
 
 
