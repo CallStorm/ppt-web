@@ -24,6 +24,12 @@ export function AppShell() {
         </Link>
         <nav className="flex items-center gap-1 text-sm">
           <Link
+            to="/jobs/beautify"
+            className="rounded-md border border-gemini-200 px-3 py-1.5 font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200 dark:hover:bg-gemini-950/40"
+          >
+            美化 PPT
+          </Link>
+          <Link
             to="/jobs/new"
             className="rounded-md bg-gemini-600 px-3 py-1.5 font-medium text-white hover:bg-gemini-700"
           >

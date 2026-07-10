@@ -24,6 +24,7 @@ from backend.api.schemas.job_options import (
     RevisionRequest,
     job_options_from_form,
 )
+from backend.app.templates import resolve_global_template_path
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
@@ -50,6 +51,10 @@ async def create_job(
     user: CurrentUser,
     prompt: Annotated[str, Form(min_length=1, max_length=20000)],
     project_name: Annotated[str | None, Form()] = None,
+    job_type: Annotated[str, Form()] = "generate",
+    template_kind: Annotated[str | None, Form()] = None,
+    template_id: Annotated[str | None, Form()] = None,
+    template_usage: Annotated[str, Form()] = "adaptive",
     language: Annotated[str, Form()] = "zh",
     scenario: Annotated[str, Form()] = "general",
     audience: Annotated[str, Form()] = "general",
@@ -81,6 +86,10 @@ async def create_job(
 
     try:
         opts = job_options_from_form(
+            job_type=job_type,
+            template_kind=template_kind,
+            template_id=template_id,
+            template_usage=template_usage,
             language=language,
             scenario=scenario,
             audience=audience,
@@ -103,6 +112,11 @@ async def create_job(
         )
     except ValidationError as e:
         raise HTTPException(422, detail=e.errors()) from e
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e)) from e
+
+    if opts.job_type == "beautify" and opts.template is not None:
+        resolve_global_template_path(opts.template.kind, opts.template.id)
 
     job_id = str(uuid.uuid4())
     pname = (project_name or f"web_{job_id[:8]}").strip()[:64]
@@ -130,10 +144,20 @@ async def create_job(
 
     upload_paths: list[str] = []
     total = 0
+    pptx_count = 0
     for f in files or []:
         if not f.filename:
             continue
         safe = safe_stage_name(f.filename)
+        if opts.job_type == "beautify":
+            if not safe.lower().endswith(".pptx"):
+                with SessionLocal() as s2:
+                    u2 = s2.get(User, user.id)
+                    if u2:
+                        u2.quota_credits += 1
+                        s2.commit()
+                raise HTTPException(422, "beautify job requires a .pptx upload")
+            pptx_count += 1
         dest = uploads_dir / safe
         if not is_under(dest, uploads_dir):
             log.warning(f"upload rejected (path traversal?): {f.filename}")
@@ -169,6 +193,18 @@ async def create_job(
         finally:
             await f.close()
         upload_paths.append(str(dest.resolve()))
+
+    if opts.job_type == "beautify":
+        if pptx_count != 1:
+            with SessionLocal() as s2:
+                u2 = s2.get(User, user.id)
+                if u2:
+                    u2.quota_credits += 1
+                    s2.commit()
+            raise HTTPException(
+                422,
+                "beautify job requires exactly one .pptx file",
+            )
 
     notify_dispatcher()
     return {

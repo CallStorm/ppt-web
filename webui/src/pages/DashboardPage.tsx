@@ -173,12 +173,20 @@ export function DashboardPage() {
               <p className="mt-2 max-w-sm text-xs text-slate-400">
                 上传文档或输入主题，AI 将自动生成演示文稿。
               </p>
-              <Link
-                to="/jobs/new"
-                className="mt-4 rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
-              >
-                创建
-              </Link>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Link
+                  to="/jobs/new"
+                  className="rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
+                >
+                  创建
+                </Link>
+                <Link
+                  to="/jobs/beautify"
+                  className="rounded-md border border-gemini-200 px-4 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200"
+                >
+                  美化 PPT
+                </Link>
+              </div>
             </>
           ) : hasActiveFilter ? (
             <button
