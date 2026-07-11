@@ -118,7 +118,7 @@ export function useUpsertJob() {
       const next = idx >= 0 ? [...old] : [job, ...old]
       if (idx >= 0) next[idx] = job
       return next.sort(
-        (a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime(),
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
       )
     })
     invalidateJobLists(qc)

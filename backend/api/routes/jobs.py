@@ -252,7 +252,7 @@ async def list_jobs(
         query = _apply_job_list_filters(query, status, q)
         total = query.count()
         rows = (
-            query.order_by(Job.updated_at.desc())
+            query.order_by(Job.created_at.desc(), Job.id.desc())
             .offset(offset)
             .limit(limit)
             .all()

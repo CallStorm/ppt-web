@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -125,6 +126,43 @@ class TestJobListFilters(unittest.TestCase):
     def test_search_and_status_combined(self):
         names = self._names("failed", "epsilon")
         self.assertEqual(names, ["Epsilon Failed"])
+
+    def test_list_order_by_created_at_desc(self):
+        user = User(
+            id=str(uuid.uuid4()),
+            email="sort-test@example.com",
+            password_hash="x",
+            quota_credits=10,
+        )
+        self.session.add(user)
+        older = Job(
+            id=str(uuid.uuid4()),
+            user_id=user.id,
+            prompt="older job",
+            project_name="Older Job",
+            status="done",
+            created_at=datetime(2026, 1, 1, 10, 0, 0),
+            updated_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        newer = Job(
+            id=str(uuid.uuid4()),
+            user_id=user.id,
+            prompt="newer job",
+            project_name="Newer Job",
+            status="done",
+            created_at=datetime(2026, 6, 1, 10, 0, 0),
+            updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        )
+        self.session.add_all([older, newer])
+        self.session.commit()
+
+        rows = (
+            self.session.query(Job)
+            .filter(Job.user_id == user.id)
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .all()
+        )
+        self.assertEqual([row.project_name for row in rows], ["Newer Job", "Older Job"])
 
 
 if __name__ == "__main__":

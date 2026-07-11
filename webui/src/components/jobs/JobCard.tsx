@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Job } from '../../api/types'
 import { downloadUrl } from '../../api/client'
@@ -74,23 +74,10 @@ export function JobCard({
     (job.status === 'paused' && !job.session_id)
   const deleteJob = useDeleteJob()
   const retryJob = useRetryJob()
-  const [menuOpen, setMenuOpen] = useState(false)
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
 
   const previewOk = !!job.has_preview && isDone && !previewFailed
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [menuOpen])
 
   const stop = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -105,13 +92,11 @@ export function JobCard({
 
   const handlePreview = (e: React.MouseEvent) => {
     stop(e)
-    setMenuOpen(false)
     setPreviewOpen(true)
   }
 
   const handleRetry = async (e: React.MouseEvent) => {
     stop(e)
-    setMenuOpen(false)
     try {
       await retryJob.mutateAsync(job.id)
     } catch (err) {
@@ -119,14 +104,8 @@ export function JobCard({
     }
   }
 
-  const handleMenuToggle = (e: React.MouseEvent) => {
-    stop(e)
-    setMenuOpen((v) => !v)
-  }
-
   const handleDelete = async (e: React.MouseEvent) => {
     stop(e)
-    setMenuOpen(false)
     const ok = await confirmDialog({
       title: '删除作品',
       body: `确认删除「${job.project_name || '(未命名)'}」？此操作不可恢复。`,
@@ -164,7 +143,6 @@ export function JobCard({
                   hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-900`,
         styles.shell,
         compact && 'flex h-full min-h-0 flex-col overflow-hidden',
-        menuOpen ? 'z-30' : '',
         job.status === 'running'
           ? 'border-l-[3px] border-l-gemini-500 border-slate-200 dark:border-slate-700'
           : 'border-slate-200 dark:border-slate-700',
@@ -303,72 +281,6 @@ export function JobCard({
             {metaText}
           </p>
           <QueueBadge position={job.queue_position} />
-          <div className="relative shrink-0" ref={menuRef}>
-            <button
-              type="button"
-              onClick={handleMenuToggle}
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-              aria-label="更多操作"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="5" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="19" cy="12" r="2" />
-              </svg>
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                {isDone && (
-                  <button
-                    type="button"
-                    onClick={handlePreview}
-                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
-                  >
-                    预览
-                  </button>
-                )}
-                {showDownload && (
-                  <button
-                    type="button"
-                    onClick={handleDownload}
-                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
-                  >
-                    下载 PPTX
-                  </button>
-                )}
-                {isDone && hasPptx && (
-                  <Link
-                    to={`/jobs/${job.id}/edit`}
-                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpen(false)
-                    }}
-                  >
-                    编辑修改
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={deleteJob.isPending}
-                  className="block w-full px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:hover:bg-rose-900/20"
-                >
-                  删除
-                </button>
-                {canRetry && (
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    disabled={retryJob.isPending}
-                    className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                  >
-                    重试
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {!compact && promptSummary && (
