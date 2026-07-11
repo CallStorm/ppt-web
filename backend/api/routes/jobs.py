@@ -24,9 +24,11 @@ from backend.api.schemas.job_options import (
     RevisionRequest,
     job_options_from_form,
 )
+from backend.app.templates import resolve_global_template_path
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
+from sqlalchemy import func, or_
 from backend.paths import ensure_data_dirs, is_under, project_root_for, safe_stage_name, uploads_dir_for
 from backend.runner.preview import find_cover_preview, list_slides
 from backend.runtime import (
@@ -45,11 +47,37 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024
 
 
+def _apply_job_list_filters(query, status: str | None, q: str | None):
+    if status == "running":
+        query = query.filter(Job.status.in_(["running", "queued"]))
+    elif status == "paused":
+        query = query.filter(Job.status == "paused")
+    elif status == "done":
+        query = query.filter(Job.status == "done")
+    elif status == "failed":
+        query = query.filter(Job.status.in_(["failed", "cancelled"]))
+
+    term = (q or "").strip()
+    if term:
+        like = f"%{term.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(Job.project_name).like(like),
+                func.lower(Job.prompt).like(like),
+            )
+        )
+    return query
+
+
 @router.post("", status_code=201)
 async def create_job(
     user: CurrentUser,
     prompt: Annotated[str, Form(min_length=1, max_length=20000)],
     project_name: Annotated[str | None, Form()] = None,
+    job_type: Annotated[str, Form()] = "generate",
+    template_kind: Annotated[str | None, Form()] = None,
+    template_id: Annotated[str | None, Form()] = None,
+    template_usage: Annotated[str, Form()] = "adaptive",
     language: Annotated[str, Form()] = "zh",
     scenario: Annotated[str, Form()] = "general",
     audience: Annotated[str, Form()] = "general",
@@ -81,6 +109,10 @@ async def create_job(
 
     try:
         opts = job_options_from_form(
+            job_type=job_type,
+            template_kind=template_kind,
+            template_id=template_id,
+            template_usage=template_usage,
             language=language,
             scenario=scenario,
             audience=audience,
@@ -103,6 +135,11 @@ async def create_job(
         )
     except ValidationError as e:
         raise HTTPException(422, detail=e.errors()) from e
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e)) from e
+
+    if opts.job_type == "beautify" and opts.template is not None:
+        resolve_global_template_path(opts.template.kind, opts.template.id)
 
     job_id = str(uuid.uuid4())
     pname = (project_name or f"web_{job_id[:8]}").strip()[:64]
@@ -130,10 +167,20 @@ async def create_job(
 
     upload_paths: list[str] = []
     total = 0
+    pptx_count = 0
     for f in files or []:
         if not f.filename:
             continue
         safe = safe_stage_name(f.filename)
+        if opts.job_type == "beautify":
+            if not safe.lower().endswith(".pptx"):
+                with SessionLocal() as s2:
+                    u2 = s2.get(User, user.id)
+                    if u2:
+                        u2.quota_credits += 1
+                        s2.commit()
+                raise HTTPException(422, "beautify job requires a .pptx upload")
+            pptx_count += 1
         dest = uploads_dir / safe
         if not is_under(dest, uploads_dir):
             log.warning(f"upload rejected (path traversal?): {f.filename}")
@@ -170,6 +217,18 @@ async def create_job(
             await f.close()
         upload_paths.append(str(dest.resolve()))
 
+    if opts.job_type == "beautify":
+        if pptx_count != 1:
+            with SessionLocal() as s2:
+                u2 = s2.get(User, user.id)
+                if u2:
+                    u2.quota_credits += 1
+                    s2.commit()
+            raise HTTPException(
+                422,
+                "beautify job requires exactly one .pptx file",
+            )
+
     notify_dispatcher()
     return {
         "id": job_id,
@@ -185,9 +244,12 @@ async def list_jobs(
     user: CurrentUser,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    status: str | None = Query(None, pattern="^(running|paused|done|failed)$"),
+    q: str | None = Query(None, max_length=200),
 ) -> dict:
     with SessionLocal() as s:
         query = s.query(Job).filter(Job.user_id == user.id)
+        query = _apply_job_list_filters(query, status, q)
         total = query.count()
         rows = (
             query.order_by(Job.updated_at.desc())
@@ -200,6 +262,29 @@ async def list_jobs(
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+@router.get("/stats")
+async def job_stats(user: CurrentUser) -> dict:
+    with SessionLocal() as s:
+        rows = (
+            s.query(Job.status, func.count())
+            .filter(Job.user_id == user.id)
+            .group_by(Job.status)
+            .all()
+        )
+    by_status = {status: count for status, count in rows}
+    running = by_status.get("running", 0) + by_status.get("queued", 0)
+    paused = by_status.get("paused", 0)
+    done = by_status.get("done", 0)
+    failed = by_status.get("failed", 0) + by_status.get("cancelled", 0)
+    return {
+        "all": sum(by_status.values()),
+        "running": running,
+        "paused": paused,
+        "done": done,
+        "failed": failed,
     }
 
 

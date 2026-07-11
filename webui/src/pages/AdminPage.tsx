@@ -4,6 +4,8 @@ import { api } from '../api/client'
 import type { AdminJob, AdminOverview, AdminUser } from '../api/types'
 import { useAuthStore } from '../stores/authStore'
 import { confirmDialog } from '../stores/modalStore'
+import { PageShell } from '../components/ui/PageShell'
+import { Tabs } from '../components/ui/Tabs'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 import { StatusPill } from '../components/jobs/StatusPill'
 import { fmtDateTime } from '../lib/format'
@@ -536,25 +538,13 @@ export function AdminPage() {
   ]
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-      <h1 className="mb-6 text-xl font-semibold">管理后台</h1>
-
-      <div className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm ${
-              tab === t.key
-                ? 'border-b-2 border-gemini-600 font-medium text-gemini-600'
-                : 'text-slate-500'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+    <PageShell width="6xl" title="管理后台">
+      <Tabs
+        className="mb-4"
+        tabs={tabs.map((t) => ({ id: t.key, label: t.label }))}
+        active={tab}
+        onChange={(id) => setTab(id as typeof tab)}
+      />
 
       {loading && <p className="text-sm text-slate-400">加载中…</p>}
 
@@ -1071,7 +1061,7 @@ export function AdminPage() {
           )}
         </div>
       )}
-    </div>
+    </PageShell>
   )
 }
 

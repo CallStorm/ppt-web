@@ -24,6 +24,26 @@ export type JobImageStrategy = 'ai' | 'web' | 'provided' | 'placeholder' | 'none
 export type JobIconStrategy = 'emoji' | 'library' | 'ai' | 'custom'
 export type JobFormulaPolicy = 'mixed' | 'render-all' | 'text-only'
 
+export type JobType = 'generate' | 'beautify'
+export type TemplateKind = 'deck' | 'layout'
+export type TemplateUsage = 'adaptive' | 'strict'
+
+export interface TemplateRef {
+  scope: 'global'
+  kind: TemplateKind
+  id: string
+}
+
+export interface TemplateCatalogEntry extends TemplateRef {
+  summary: string
+  canvas_format: string
+  page_count: number
+  page_types: string[]
+  primary_color: string | null
+  cover_svg: string | null
+  preview_slides: string[]
+}
+
 export type JobVisualStyle =
   | 'auto'
   | 'swiss-minimal'
@@ -55,6 +75,10 @@ export type JobIndustry =
   | 'creative'
 
 export interface JobOptions {
+  job_type?: JobType
+  template?: TemplateRef | null
+  template_usage?: TemplateUsage
+
   language: JobLanguage
   scenario: JobScenario
   audience: JobAudience
@@ -255,6 +279,10 @@ export const GLOBAL_REVISION_KIND_OPTIONS: OptionItem<
 ]
 
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
+  job_type: 'generate',
+  template: null,
+  template_usage: 'adaptive',
+
   language: 'zh',
   scenario: 'general',
   audience: 'general',

@@ -37,6 +37,10 @@ ColorMode = Literal["auto", "brand", "industry"]
 ImageStrategy = Literal["ai", "web", "provided", "placeholder", "none"]
 IconStrategy = Literal["emoji", "library", "ai", "custom"]
 FormulaPolicy = Literal["mixed", "render-all", "text-only"]
+JobType = Literal["generate", "beautify"]
+TemplateKind = Literal["deck", "layout"]
+TemplateScope = Literal["global"]
+TemplateUsage = Literal["adaptive", "strict"]
 
 # visual_style：ppt-master 全量 18 预设 + auto（auto = 由 AI 推荐）
 VISUAL_STYLES = (
@@ -179,7 +183,17 @@ class RevisionRequest(BaseModel):
         return self
 
 
+class TemplateRef(BaseModel):
+    scope: TemplateScope = "global"
+    kind: TemplateKind
+    id: str = Field(min_length=1, max_length=128)
+
+
 class JobOptions(BaseModel):
+    job_type: JobType = "generate"
+    template: TemplateRef | None = None
+    template_usage: TemplateUsage = "adaptive"
+
     # ── 现有（保持） ─────────────────────────────────────
     language: Language = "zh"
     scenario: Scenario = "general"
@@ -237,6 +251,11 @@ class JobOptions(BaseModel):
             raise ValueError("color_mode=brand requires brand_hex")
         if self.color_mode == "industry" and not self.industry:
             raise ValueError("color_mode=industry requires industry")
+        if self.job_type == "beautify":
+            if self.template is None:
+                raise ValueError("job_type=beautify requires template")
+        elif self.template is not None:
+            raise ValueError("template is only valid for job_type=beautify")
 
 
 DEFAULT_JOB_OPTIONS = JobOptions()
@@ -349,6 +368,10 @@ def parse_job_options(raw: str | None) -> JobOptions | None:
 
 def job_options_from_form(
     *,
+    job_type: str = "generate",
+    template_kind: str | None = None,
+    template_id: str | None = None,
+    template_usage: str = "adaptive",
     language: str = "zh",
     scenario: str = "general",
     audience: str = "general",
@@ -371,7 +394,20 @@ def job_options_from_form(
 ) -> JobOptions:
     # visual_style="auto" 等价于 None（让 agent 自己挑）
     vs = visual_style if visual_style and visual_style != "auto" else None
+    jt: JobType = job_type if job_type in ("generate", "beautify") else "generate"
+    template: TemplateRef | None = None
+    if jt == "beautify":
+        if not template_kind or not template_id:
+            raise ValueError("beautify job requires template_kind and template_id")
+        if template_kind not in ("deck", "layout"):
+            raise ValueError(f"template_kind must be deck or layout, got {template_kind!r}")
+        if template_usage not in ("adaptive", "strict"):
+            raise ValueError(f"template_usage must be adaptive or strict, got {template_usage!r}")
+        template = TemplateRef(kind=template_kind, id=template_id.strip())
     return JobOptions(
+        job_type=jt,
+        template=template,
+        template_usage=template_usage if template_usage in ("adaptive", "strict") else "adaptive",
         language=language,
         scenario=scenario,
         audience=audience,
@@ -514,4 +550,38 @@ def format_options_for_prompt(opts: JobOptions) -> str:
     lines.append(f"- 生成演讲者备注：{'是' if opts.include_speaker_notes else '否'}")
     if opts.split_mode:
         lines.append("- 长 deck 提示：在 Phase A 完成后建议用户切到 split mode（继续生成 projects/<name>）")
+    return "\n".join(lines)
+
+
+def format_beautify_options_for_prompt(
+    opts: JobOptions,
+    *,
+    container_template_path: str,
+) -> str:
+    """Render beautify-specific agent instructions."""
+    if opts.template is None:
+        raise ValueError("template is required for beautify prompt")
+    usage = opts.template_usage
+    lines = [
+        "PPT 美化要求（模板套用模式，请严格遵循）：",
+        "",
+        f"- 选中模板目录（容器内）: {container_template_path}",
+        f"- 模板类型: {opts.template.kind} / ID: {opts.template.id}",
+        f"- 模板使用模式: {usage}（adaptive=按 page_type 为每源页选最匹配版式并可复用 content 版式；strict=保持所选 Layout 契约不变）",
+        "",
+        "【内容不变量 — beautify 硬约束】",
+        "- 源 PPTX 全部文字逐字保留，不增 / 不删 / 不改写 / 不重排页序",
+        "- 输出页数必须等于源 slide 数（严格 1:1）",
+        "- 图表 / 表格数据值冻结，仅按模板风格重绘",
+        "- 源配图可重新排版但保留原图文件",
+        "",
+        "【视觉身份 — 来自模板，禁止继承源 PPT】",
+        "- 配色 / 字体 / 装饰 / 版式结构一律锁定为所选模板的 design_spec.md",
+        "- 禁止把源 PPT 的 theme / observed 配色字体当作输出身份",
+        "- 每页从模板 SVG roster 选最匹配 layout（content 页可复用同一版式）",
+        "",
+        "【图片策略】",
+        "- 使用源 PPT 已提取的图片（image_usage=provided）",
+        "",
+    ]
     return "\n".join(lines)
