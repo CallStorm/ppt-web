@@ -22,6 +22,8 @@ if [[ ! -f webui/dist/index.html ]]; then
   (cd webui && npm install && npm run build)
 fi
 
+bash scripts/ensure-ppt-master.sh
+
 if [[ ! -d .venv ]]; then
   echo "error: .venv not found. Run: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt"
   exit 1

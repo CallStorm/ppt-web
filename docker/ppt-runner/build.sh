@@ -13,6 +13,8 @@ echo "==> Building $IMAGE (context: $(pwd))"
 docker build -f docker/ppt-runner/Dockerfile -t "$IMAGE" \
   --build-arg BASE_REGISTRY="${DOCKER_BASE_REGISTRY:-docker.m.daocloud.io/library}" \
   --build-arg PIP_INDEX_URL="${DOCKER_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}" \
+  --build-arg PPT_MASTER_REPO="${PPT_MASTER_REPO:-https://github.com/hugohe3/ppt-master.git}" \
+  --build-arg PPT_MASTER_REF="${PPT_MASTER_REF:-main}" \
   .
 
 echo "==> Ensuring $NETWORK network exists"

@@ -14,7 +14,7 @@
 | Docker | 最新稳定版 | MySQL 容器 + 每 job 执行容器（**必需**） |
 | Python | 3.11+ | 后端 |
 | Node.js | 18+ | 前端构建 |
-| git | — | clone 含 submodule |
+| git | — | clone 仓库与 ppt-master |
 
 ### 1. 启动 MySQL（Docker）
 
@@ -41,13 +41,21 @@ bash docker/ppt-runner/build.sh
 ### 3. 克隆仓库
 
 ```bash
-git clone --recursive <repo-url>
+git clone <repo-url>
 cd ppt-web
 ```
 
-⚠️ **必须带 `--recursive`**，否则 `ppt-master/` 为空目录。
+### 4. 准备 ppt-master（本地开发）
 
-### 4. Python 环境 + 配置 .env
+后端模板 API 与 runner 依赖仓库根目录下的 `ppt-master/`：
+
+```bash
+bash scripts/ensure-ppt-master.sh
+```
+
+`dev-web.sh` 启动前也会自动执行此脚本。Docker 镜像构建时会在 `build.sh` 内 clone 上游，无需本地目录。
+
+### 5. Python 环境 + 配置 .env
 
 ```bash
 python3 -m venv .venv
@@ -59,13 +67,13 @@ cp .env.example .env
 
 `.env.example` 已预填 MySQL `DB_URL`，与步骤 1 的 Docker 账号一致。
 
-### 5. 构建前端
+### 6. 构建前端
 
 ```bash
 cd webui && npm install && npm run build && cd ..
 ```
 
-### 6. 启动服务
+### 7. 启动服务
 
 ```bash
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8765
@@ -74,7 +82,7 @@ cd webui && npm install && npm run build && cd ..
 
 **分离模式（HMR）**：见 [deployment.md](deployment.md#本地开发模式)。
 
-### 7. 验证
+### 8. 验证
 
 1. 浏览器打开 `http://127.0.0.1:8765/`，注册并登录
 2. `curl http://127.0.0.1:8765/api/health`
@@ -86,7 +94,7 @@ cd webui && npm install && npm run build && cd ..
 |------|------|
 | 无法连接数据库 | 确认 `docker ps` 中 ppt-mysql 在运行；检查 `.env` 中 `DB_URL` |
 | `Docker image not found` | 运行 `bash docker/ppt-runner/build.sh` |
-| `ppt-master/` 为空 | `git submodule update --init --recursive` |
+| `ppt-master/` 缺失 | `bash scripts/ensure-ppt-master.sh` |
 | 登录态重启后失效 | 设置 `PPT_WEB_JWT_SECRET` |
 | 前端 404 | 先 `cd webui && npm run build` |
 
@@ -100,8 +108,6 @@ ppt-web/
 ├── README.md              # 快速开始
 ├── Docs/                  # 完整文档（product/architecture/design/development/deployment/reference）
 ├── .env.example           # 环境变量模板
-├── .gitmodules            # ppt-master submodule 配置
-│
 ├── phase0/                # CLI 调试壳（Phase 0 验证）
 │   ├── orchestrator.py    # 命令行编排，复用 backend.runner
 │   ├── fix_preview_fonts.py
@@ -152,12 +158,14 @@ ppt-web/
 │       └── entrypoint.sh
 │
 ├── scripts/
-│   └── dev-web.sh         # 开发启动脚本
+│   ├── dev-web.sh              # 开发启动脚本
+│   ├── ensure-ppt-master.sh    # 本地 clone 上游 ppt-master
+│   └── screenshot_readme.py    # README 预览截图
 │
 ├── data/                  # 运行时数据（gitignored）
 │   └── users/<uid>/       # 上传 + 产物
 │
-└── ppt-master/            # git submodule — 生成引擎
+└── ppt-master/            # 上游 clone（ensure 脚本或镜像 build 产物）
     └── skills/ppt-master/
         ├── SKILL.md       # 主流程权威
         └── scripts/       # Python 工具链

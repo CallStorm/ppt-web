@@ -35,9 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #    装到临时目录，最后 chown 给 claude 用户（不能直接以 root 跑 install.sh 然后切用户）
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# 3. 拷 ppt-master 源码（submodule 内容）
-#    注意：build context 是 repo 根（.dockerignore 已排除 .git/ .venv/ data/ 等）
-COPY ppt-master/ /opt/ppt-master/
+# 3. 从上游 clone ppt-master（不再依赖本地 submodule / COPY）
+ARG PPT_MASTER_REPO=https://github.com/hugohe3/ppt-master.git
+ARG PPT_MASTER_REF=main
+RUN git clone --depth 1 --branch "${PPT_MASTER_REF}" "${PPT_MASTER_REPO}" /opt/ppt-master
 
 # 4. 装 ppt-master 依赖（pip 用国内源加速）
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
