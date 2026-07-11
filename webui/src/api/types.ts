@@ -152,6 +152,96 @@ export interface SseEvent {
   ts?: Date
 }
 
+// ---------------------------------------------------------------------------
+// Conversations (chat-based PPT creation)
+// ---------------------------------------------------------------------------
+
+export type ConversationPhase =
+  | 'intake'
+  | 'requirements'
+  | 'outline'
+  | 'style'
+  | 'generating'
+  | 'done'
+
+export type ConversationStatus = 'planning' | 'generating' | 'done' | 'failed'
+
+export interface OutlineItem {
+  id: string
+  title: string
+  bullets: string[]
+}
+
+export interface ChatRequirements {
+  page_count: number
+  scenario: string
+  need_images: boolean
+  dynamic_answers: Array<{ question: string; answer: string }>
+  extra_notes: string
+}
+
+export interface ChatDraft {
+  core_topic: string
+  requirements: ChatRequirements
+  outline: OutlineItem[]
+  key_points: string[]
+  options: Record<string, unknown>
+  template: { kind: string; id: string } | null
+  uploads: Array<{ name: string; path: string }>
+  phase_completed: {
+    requirements: boolean
+    outline: boolean
+    style: boolean
+  }
+}
+
+export interface ChatWidget {
+  type: string
+  editable?: boolean
+  can_generate?: boolean
+  job_id?: string
+}
+
+export interface ChatMessage {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  payload: {
+    widgets?: ChatWidget[]
+    type?: string
+    action?: string
+    snapshot?: Record<string, unknown>
+    job_id?: string
+    pptx_url?: string
+    intent?: string
+    uploads?: string[]
+  }
+  created_at: string | null
+}
+
+export interface Conversation {
+  id: string
+  user_id: string
+  title: string
+  mode: string
+  status: ConversationStatus
+  phase: ConversationPhase
+  draft: ChatDraft
+  job_id: string | null
+  job?: { id: string; status: string; pptx_path: string | null }
+  created_at: string | null
+  updated_at: string | null
+  messages?: ChatMessage[]
+}
+
+export interface ConversationListResponse {
+  conversations: Conversation[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface AdminOverview {
   runtime: {
     active_count: number

@@ -4,6 +4,7 @@ import { AppShell } from './components/layout/AppShell'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { BeautifyJobPage } from './pages/BeautifyJobPage'
+import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { NewJobPage } from './pages/NewJobPage'
 import { JobDetailPage } from './pages/JobDetailPage'
 import { EditJobPage } from './pages/EditJobPage'
@@ -31,6 +32,8 @@ export function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="chat" element={<ChatWorkspacePage />} />
+        <Route path="chat/:id" element={<ChatWorkspacePage />} />
         <Route path="jobs/new" element={<NewJobPage />} />
         <Route path="jobs/beautify" element={<BeautifyJobPage />} />
         <Route path="jobs/:id" element={<JobDetailPage />} />

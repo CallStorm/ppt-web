@@ -16,9 +16,15 @@
   --font-sans: Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   font-family: var(--font-sans);
-  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  @apply overflow-hidden bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
 }
 
 .status-pill {
@@ -53,6 +59,21 @@ body {
 }
 .status-running-pulse {
   animation: pulse-ring 2s ease-in-out infinite;
+}
+
+.conv-status-running {
+  @apply bg-blue-500;
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+.conv-status-needs-input {
+  @apply bg-amber-500;
+  animation: pulse-ring 2.5s ease-in-out infinite;
+}
+.conv-status-done {
+  @apply bg-emerald-500;
+}
+.conv-status-failed {
+  @apply bg-rose-500;
 }
 
 @keyframes shimmer {

@@ -144,3 +144,15 @@ def migrate_v6_to_v7() -> bool:
     except Exception as e:
         log.warning("could not create ix_jobs_revision_of index: %s", e)
     return True
+
+
+def migrate_v7_to_v8() -> bool:
+    """Create conversations + messages tables for chat-based PPT creation."""
+    if not _has_users_table():
+        return False
+    insp = inspect(engine)
+    if insp.has_table("conversations") and insp.has_table("messages"):
+        return False
+    log.warning("migrating DB v7 -> v8 (creating conversations + messages)")
+    init_db()
+    return True

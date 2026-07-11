@@ -46,6 +46,11 @@ def uploads_dir_for(user_id: str, job_id: str) -> Path:
     return user_dir(user_id) / "uploads" / job_id
 
 
+def conversation_uploads_dir(user_id: str, conversation_id: str) -> Path:
+    """对话创作上传目录：data/users/<uid>/uploads/conversations/<conv_id>/"""
+    return user_dir(user_id) / "uploads" / "conversations" / conversation_id
+
+
 def project_root_for(user_id: str, job_id: str) -> Path:
     """per-user project root。agent 用 `init <name> --dir <这里>`。
 

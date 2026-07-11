@@ -1,4 +1,4 @@
-import { Link, Outlet, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { APP_NAME } from '../../lib/brand'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -10,6 +10,8 @@ export function AppShell() {
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
   const navigate = useNavigate()
+  const location = useLocation()
+  const isChatWorkspace = location.pathname.startsWith('/chat')
 
   const handleLogout = async () => {
     await logout()
@@ -17,12 +19,18 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-slate-200 bg-white/80 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+    <div className="flex h-screen flex-col overflow-hidden">
+      <header className="z-30 flex h-14 shrink-0 items-center border-b border-slate-200 bg-white/80 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
         <Link to="/" className="mr-6 text-base font-semibold">
           {APP_NAME}
         </Link>
         <nav className="flex items-center gap-1 text-sm">
+          <Link
+            to="/chat"
+            className="rounded-md border border-violet-200 px-3 py-1.5 font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-200 dark:hover:bg-violet-950/40"
+          >
+            对话创作
+          </Link>
           <Link
             to="/jobs/beautify"
             className="rounded-md border border-gemini-200 px-3 py-1.5 font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200 dark:hover:bg-gemini-950/40"
@@ -67,8 +75,14 @@ export function AppShell() {
           </button>
         </div>
       </header>
-      <main className="flex-1">
-        <Outlet />
+      <main
+        className={`flex min-h-0 flex-1 flex-col ${
+          isChatWorkspace ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
+      >
+        <div className={isChatWorkspace ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined}>
+          <Outlet />
+        </div>
       </main>
     </div>
   )
