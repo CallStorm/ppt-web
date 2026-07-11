@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { JobCard } from '../components/jobs/JobCard'
 import { SkeletonCard } from '../components/jobs/SkeletonCard'
@@ -7,34 +7,23 @@ import {
   type StatusFilterCounts,
   type StatusFilterValue,
 } from '../components/jobs/StatusFilter'
-import { useJobsInfinite } from '../hooks/useJobs'
+import { useJobStats, useJobsPage } from '../hooks/useJobs'
+import {
+  useDashboardViewport,
+  useJobGridLayout,
+  JOB_GRID_SIDE_PADDING,
+} from '../hooks/useResponsivePageSize'
 import type { Job } from '../api/types'
 import { truncate } from '../lib/format'
+import { resetMainScroll } from '../lib/scrollMain'
 import { PageShell } from '../components/ui/PageShell'
 import { Input } from '../components/ui/Input'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
+import { Pagination } from '../components/ui/Pagination'
+import { cn } from '../lib/cn'
 
 type Filter = StatusFilterValue
-
-function matchesFilter(job: Job, filter: Filter): boolean {
-  if (filter === 'all') return true
-  if (filter === 'running') return job.status === 'running' || job.status === 'queued'
-  if (filter === 'paused') return job.status === 'paused'
-  if (filter === 'done') return job.status === 'done'
-  if (filter === 'failed') return job.status === 'failed' || job.status === 'cancelled'
-  return true
-}
-
-function computeStatusCounts(jobs: Job[]): StatusFilterCounts {
-  return {
-    all: jobs.length,
-    running: jobs.filter((j) => j.status === 'running' || j.status === 'queued').length,
-    paused: jobs.filter((j) => j.status === 'paused').length,
-    done: jobs.filter((j) => j.status === 'done').length,
-    failed: jobs.filter((j) => j.status === 'failed' || j.status === 'cancelled').length,
-  }
-}
 
 function groupFailedErrors(jobs: Job[]): Map<string, number> {
   const map = new Map<string, number>()
@@ -47,21 +36,49 @@ function groupFailedErrors(jobs: Job[]): Map<string, number> {
   return map
 }
 
+const EMPTY_STATS: StatusFilterCounts = {
+  all: 0,
+  running: 0,
+  paused: 0,
+  done: 0,
+  failed: 0,
+}
+
 export function DashboardPage() {
-  const jobsQ = useJobsInfinite()
+  const { pageSize, cardSize, gridClass, coverAspect } = useJobGridLayout()
+  const pageGutter = `mx-auto flex w-full min-h-0 flex-1 flex-col ${JOB_GRID_SIDE_PADDING}`
+  const [page, setPage] = useState(1)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
+  const [searchQ, setSearchQ] = useState('')
   const [bannerDismissed, setBannerDismissed] = useState(false)
 
-  const jobs = useMemo(
-    () => jobsQ.data?.pages.flatMap((p) => p.jobs ?? []) ?? [],
-    [jobsQ.data],
-  )
-  const total = jobsQ.data?.pages[0]?.total ?? jobs.length
-  const hasMore = jobs.length < total
-  const isLoading = jobsQ.isLoading
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQ(query), 300)
+    return () => clearTimeout(t)
+  }, [query])
 
-  const statusCounts = useMemo(() => computeStatusCounts(jobs), [jobs])
+  const jobsQ = useJobsPage({ page, pageSize, filter, q: searchQ })
+  const statsQ = useJobStats()
+
+  const jobs = jobsQ.data?.jobs ?? []
+  const total = jobsQ.data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const isLoading = jobsQ.isPending || (jobsQ.isFetching && jobs.length === 0)
+  const isFetching = jobsQ.isFetching
+
+  const statusCounts = useMemo<StatusFilterCounts>(() => {
+    const s = statsQ.data
+    if (!s) return EMPTY_STATS
+    return {
+      all: s.all,
+      running: s.running,
+      paused: s.paused,
+      done: s.done,
+      failed: s.failed,
+    }
+  }, [statsQ.data])
+
   const errorGroups = useMemo(() => groupFailedErrors(jobs), [jobs])
 
   const systemicError = useMemo(() => {
@@ -71,163 +88,227 @@ export function DashboardPage() {
     return null
   }, [errorGroups])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return jobs.filter((j) => {
-      if (!matchesFilter(j, filter)) return false
-      if (!q) return true
-      return (
-        (j.project_name || '').toLowerCase().includes(q) ||
-        (j.prompt || '').toLowerCase().includes(q)
-      )
-    })
-  }, [jobs, filter, query])
-
-  const reduced = filtered.length !== jobs.length
-  const hasActiveFilter = filter !== 'all' || query.trim().length > 0
+  const hasActiveFilter = filter !== 'all' || searchQ.trim().length > 0
   const pausedCount = statusCounts.paused
+  const hasAnyJobs = (statsQ.data?.all ?? 0) > 0
+  const showPausedAlert = pausedCount > 0
+  const showErrorAlert = systemicError != null && !bannerDismissed
+  const alertCount = (showPausedAlert ? 1 : 0) + (showErrorAlert ? 1 : 0)
+  const { pageHeightClass, gridStyle } = useDashboardViewport(alertCount)
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter, searchQ])
+
+  const handleFilterChange = (next: Filter) => {
+    setFilter(next)
+    setPage(1)
+  }
+
+  const jobGrid = (content: ReactNode) => (
+    <div className={gridClass} style={gridStyle}>
+      {content}
+    </div>
+  )
+
+  useEffect(() => {
+    if (!isLoading && jobs.length === 0 && page > 1 && total > 0) {
+      setPage((p) => Math.max(1, p - 1))
+    }
+  }, [isLoading, jobs.length, page, total])
+
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount)
+    }
+  }, [page, pageCount])
 
   const clearFilters = () => {
     setFilter('all')
     setQuery('')
+    setPage(1)
   }
 
+  const handlePageChange = (next: number) => {
+    setPage(next)
+    resetMainScroll()
+  }
+
+  const listError =
+    jobsQ.isError && jobsQ.error instanceof Error
+      ? jobsQ.error.message
+      : jobsQ.isError
+        ? '加载作品列表失败'
+        : null
+
   return (
-    <PageShell width="7xl">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
-            我的作品
-            <span className="ml-2 text-sm font-normal text-muted-fg">
-              ({reduced ? `${filtered.length}/${jobs.length}` : jobs.length}
-              {total > jobs.length ? `，共 ${total} 条` : ''})
-            </span>
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索作品…"
-            className="sm:w-56"
-          />
-          <StatusFilter value={filter} onChange={setFilter} counts={statusCounts} />
-        </div>
-      </div>
-
-      {pausedCount > 0 && (
-        <Alert
-          variant="warning"
-          className="mb-4"
-          actions={
-            <Button type="button" size="sm" className="bg-amber-600 text-white hover:bg-amber-700" onClick={() => setFilter('paused')}>
-              查看待确认
-            </Button>
-          }
-        >
-          你有 {pausedCount} 个作品等待确认，需处理后才能继续生成。
-        </Alert>
-      )}
-
-      {systemicError && !bannerDismissed && (
-        <Alert
-          variant="error"
-          className="mb-4"
-          actions={
-            <>
-              <Button type="button" size="sm" className="bg-rose-600 text-white hover:bg-rose-700" onClick={() => setFilter('failed')}>
-                只看失败
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setBannerDismissed(true)} aria-label="关闭提示">
-                ×
-              </Button>
-            </>
-          }
-        >
-          <span className="font-medium">{systemicError.count} 个作品</span>
-          因同一原因失败：{truncate(systemicError.msg, 80)}
-        </Alert>
-      )}
-
-      {isLoading ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-sm text-slate-400">
-            {jobs.length === 0
-              ? '还没有作品'
-              : query.trim()
-                ? `没有匹配「${query.trim()}」的作品`
-                : '没有匹配的作品'}
-          </p>
-          {jobs.length === 0 ? (
-            <>
-              <p className="mt-2 max-w-sm text-xs text-slate-400">
-                上传文档或输入主题，AI 将自动生成演示文稿。
-              </p>
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                <Link
-                  to="/jobs/new"
-                  className="rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
-                >
-                  创建
-                </Link>
-                <Link
-                  to="/jobs/beautify"
-                  className="rounded-md border border-gemini-200 px-4 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200"
-                >
-                  美化 PPT
-                </Link>
-              </div>
-            </>
-          ) : hasActiveFilter ? (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="mt-4 rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              清除搜索和筛选
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-            {filtered.map((job) => {
-              const err = job.error_message?.trim()
-              const sharedErrorCount =
-                job.status === 'failed' && err ? (errorGroups.get(err) ?? 0) : 0
-              return (
-                <JobCard
-                  key={job.id}
-                  job={job}
-                  sharedErrorCount={sharedErrorCount}
-                />
-              )
-            })}
+    <PageShell width="full" className={cn('overflow-hidden px-0 py-4 sm:px-0', pageHeightClass)}>
+      <div className={pageGutter}>
+        <div className="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold">
+              我的作品
+              <span className="ml-2 text-sm font-normal text-muted-fg">
+                ({hasActiveFilter ? `${total} 条匹配` : `共 ${total} 条`})
+              </span>
+            </h1>
           </div>
-          {hasMore && !hasActiveFilter && (
-            <div className="mt-6 flex flex-col items-center gap-2">
-              <p className="text-xs text-slate-400">
-                已加载 {jobs.length} / {total} 条
-              </p>
-              <button
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索作品…"
+              className="sm:w-56"
+            />
+            <StatusFilter value={filter} onChange={handleFilterChange} counts={statusCounts} />
+          </div>
+        </div>
+
+        {listError && (
+          <Alert
+            variant="error"
+            className="mb-3 shrink-0"
+            actions={
+              <Button type="button" size="sm" onClick={() => jobsQ.refetch()}>
+                重试
+              </Button>
+            }
+          >
+            {listError}
+          </Alert>
+        )}
+
+        {showPausedAlert && (
+          <Alert
+            variant="warning"
+            className="mb-3 shrink-0"
+            actions={
+              <Button
                 type="button"
-                onClick={() => jobsQ.fetchNextPage()}
-                disabled={jobsQ.isFetchingNextPage}
-                className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                size="sm"
+                className="bg-amber-600 text-white hover:bg-amber-700"
+                onClick={() => handleFilterChange('paused')}
               >
-                {jobsQ.isFetchingNextPage ? '加载中…' : '加载更多'}
-              </button>
+                查看待确认
+              </Button>
+            }
+          >
+            你有 {pausedCount} 个作品等待确认，需处理后才能继续生成。
+          </Alert>
+        )}
+
+        {showErrorAlert && systemicError && (
+          <Alert
+            variant="error"
+            className="mb-3 shrink-0"
+            actions={
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-rose-600 text-white hover:bg-rose-700"
+                  onClick={() => handleFilterChange('failed')}
+                >
+                  只看失败
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBannerDismissed(true)}
+                  aria-label="关闭提示"
+                >
+                  ×
+                </Button>
+              </>
+            }
+          >
+            <span className="font-medium">{systemicError.count} 个作品</span>
+            因同一原因失败：{truncate(systemicError.msg, 80)}
+          </Alert>
+        )}
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {isLoading ? (
+            jobGrid(
+              Array.from({ length: pageSize }).map((_, i) => (
+                <SkeletonCard key={i} size={cardSize} compact coverAspect={coverAspect} />
+              )),
+            )
+          ) : jobs.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
+              <p className="text-sm text-slate-400">
+                {!hasAnyJobs
+                  ? '还没有作品'
+                  : searchQ.trim()
+                    ? `没有匹配「${searchQ.trim()}」的作品`
+                    : '没有匹配的作品'}
+              </p>
+              {!hasAnyJobs ? (
+                <>
+                  <p className="mt-2 max-w-sm text-xs text-slate-400">
+                    上传文档或输入主题，AI 将自动生成演示文稿。
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    <Link
+                      to="/jobs/new"
+                      className="rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
+                    >
+                      创建
+                    </Link>
+                    <Link
+                      to="/jobs/beautify"
+                      className="rounded-md border border-gemini-200 px-4 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200"
+                    >
+                      美化 PPT
+                    </Link>
+                  </div>
+                </>
+              ) : hasActiveFilter ? (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="mt-4 rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  清除搜索和筛选
+                </button>
+              ) : null}
             </div>
+          ) : (
+            <>
+              {jobGrid(
+                jobs.map((job) => {
+                  const err = job.error_message?.trim()
+                  const sharedErrorCount =
+                    job.status === 'failed' && err ? (errorGroups.get(err) ?? 0) : 0
+                  return (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      size={cardSize}
+                      compact
+                      coverAspect={coverAspect}
+                      sharedErrorCount={sharedErrorCount}
+                    />
+                  )
+                }),
+              )}
+            </>
           )}
-        </>
-      )}
+        </div>
+
+        {!isLoading && jobs.length > 0 && (
+          <Pagination
+            className="mt-3 shrink-0"
+            page={page}
+            pageCount={pageCount}
+            total={total}
+            onPageChange={handlePageChange}
+            loading={isFetching}
+          />
+        )}
+      </div>
     </PageShell>
   )
 }

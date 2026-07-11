@@ -4,7 +4,7 @@ import { cn } from '../../lib/cn'
 type Props = {
   children: ReactNode
   className?: string
-  width?: '4xl' | '5xl' | '6xl' | '7xl'
+  width?: '4xl' | '5xl' | '6xl' | '7xl' | 'full'
   title?: string
   description?: string
   actions?: ReactNode
@@ -15,6 +15,7 @@ const widthMap = {
   '5xl': 'max-w-5xl',
   '6xl': 'max-w-6xl',
   '7xl': 'max-w-7xl',
+  full: 'max-w-none',
 }
 
 export function PageShell({

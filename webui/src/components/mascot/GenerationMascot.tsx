@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
-import Lottie from 'lottie-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { useActiveJobs } from '../../hooks/useActiveJobs'
 import { useJob } from '../../hooks/useJobs'
 import { useJobEvents } from '../../hooks/useJobEvents'
-import { useConversation } from '../../hooks/useConversations'
 import type { SseEvent } from '../../api/types'
 import {
   moodFromStatus,
@@ -12,34 +11,78 @@ import {
   type MascotMood,
 } from '../../lib/jobStageCopy'
 import { isActiveJobStatus, useMascotStore } from '../../stores/mascotStore'
-import idleAnim from '../../assets/mascot/idle.json'
-import talkingAnim from '../../assets/mascot/talking.json'
-import celebrateAnim from '../../assets/mascot/celebrate.json'
-import sadAnim from '../../assets/mascot/sad.json'
+import { MascotCharacter } from './MascotCharacter'
+import { MascotProgress } from './MascotProgress'
 
-const MOOD_ANIM: Record<Exclude<MascotMood, 'hidden'>, object> = {
-  idle: idleAnim,
-  working: talkingAnim,
-  celebrate: celebrateAnim,
-  error: sadAnim,
+const IDLE_SPEECH = [
+  '我是 ForgeBot，\n随时帮你做 PPT～',
+  '想创作？\n点上方「创建」\n或「对话创作」',
+  '有任务在跑时，\n我会在这里报进度',
+]
+
+function MascotBubble({ text, subtitle }: { text: string; subtitle?: string }) {
+  return (
+    <div className="relative mb-2 w-[7rem] rounded-xl border border-border bg-surface-elevated/95 px-2.5 py-2.5 text-center text-xs leading-relaxed text-foreground shadow-lg backdrop-blur">
+      {subtitle && (
+        <p className="mb-1 break-words text-[10px] text-muted-fg">{subtitle}</p>
+      )}
+      <p className="whitespace-pre-line break-words">{text}</p>
+      <span className="absolute -bottom-2 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-border bg-surface-elevated/95" />
+    </div>
+  )
 }
 
-function MascotBubble({ text }: { text: string }) {
+function MascotShell({
+  children,
+  onHide,
+  hideLabel = '收起助手',
+}: {
+  children: ReactNode
+  onHide: () => void
+  hideLabel?: string
+}) {
   return (
-    <div className="relative mb-2 max-w-[220px] rounded-2xl border border-border bg-surface-elevated/95 px-3 py-2 text-sm text-slate-800 shadow-lg backdrop-blur dark:text-slate-100">
-      <p className="leading-snug">{text}</p>
-      <span className="absolute -bottom-2 right-8 h-3 w-3 rotate-45 border-b border-r border-border bg-surface-elevated/95" />
+    <div className="pointer-events-auto fixed bottom-24 right-6 z-40 flex flex-col items-end">
+      {children}
+      <div className="relative min-h-[7rem] min-w-[7rem]">
+        <MascotCharacter mood="idle" />
+        <button
+          type="button"
+          onClick={onHide}
+          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary-muted text-[10px] text-muted-fg hover:bg-border"
+          aria-label={hideLabel}
+        >
+          ×
+        </button>
+      </div>
     </div>
+  )
+}
+
+function MascotIdle() {
+  const setEnabled = useMascotStore((s) => s.setEnabled)
+  const [rotate, setRotate] = useState(0)
+  const speech = IDLE_SPEECH[rotate % IDLE_SPEECH.length]!
+
+  useEffect(() => {
+    const t = setInterval(() => setRotate((r) => r + 1), 6000)
+    return () => clearInterval(t)
+  }, [])
+
+  return (
+    <MascotShell onHide={() => setEnabled(false)} hideLabel="隐藏助手">
+      <MascotBubble text={speech} />
+    </MascotShell>
   )
 }
 
 type InnerProps = {
   jobId: string
+  taskLabel?: string
 }
 
-function MascotForJob({ jobId }: InnerProps) {
-  const { data: job, refetch } = useJob(jobId)
-  const dismissed = useMascotStore((s) => s.dismissed)
+function MascotForJob({ jobId, taskLabel }: InnerProps) {
+  const { data: job, refetch, isLoading, isPending } = useJob(jobId, { refetchInterval: 5000 })
   const setProgress = useMascotStore((s) => s.setProgress)
   const dismiss = useMascotStore((s) => s.dismiss)
   const [justFinished, setJustFinished] = useState(false)
@@ -49,6 +92,7 @@ function MascotForJob({ jobId }: InnerProps) {
   const [mood, setMood] = useState<MascotMood>('idle')
 
   const status = job?.status ?? null
+  const loading = isLoading || isPending
 
   const onEvent = useCallback(
     (ev: SseEvent) => {
@@ -66,17 +110,30 @@ function MascotForJob({ jobId }: InnerProps) {
   useJobEvents(jobId, onEvent)
 
   useEffect(() => {
+    setStage(null)
+    setSpeech('')
+    setJustFinished(false)
+    setMood('idle')
+    setRotate(0)
+  }, [jobId])
+
+  useEffect(() => {
     if (status === 'done') setJustFinished(true)
   }, [status])
 
   useEffect(() => {
+    if (loading) {
+      setMood('idle')
+      setSpeech('正在连接任务进度…')
+      return
+    }
     if (!status) return
     const nextMood = moodFromStatus(status)
     const nextSpeech = stageToSpeech(stage, status, job?.queue_position ?? null, rotate)
     setMood(nextMood)
     setSpeech(nextSpeech)
     setProgress({ status, stage, speech: nextSpeech, mood: nextMood })
-  }, [status, stage, job?.queue_position, rotate, setProgress])
+  }, [loading, status, stage, job?.queue_position, rotate, setProgress])
 
   useEffect(() => {
     if (!isActiveJobStatus(status)) return
@@ -91,22 +148,26 @@ function MascotForJob({ jobId }: InnerProps) {
   }, [justFinished])
 
   const visible =
-    !dismissed &&
-    status &&
-    (isActiveJobStatus(status) || (justFinished && mood === 'celebrate') || mood === 'error')
-  const anim = mood === 'hidden' ? idleAnim : MOOD_ANIM[mood]
+    loading ||
+    (status &&
+      (isActiveJobStatus(status) ||
+        (justFinished && mood === 'celebrate') ||
+        mood === 'error'))
 
   if (!visible || mood === 'hidden') return null
 
+  const displayMood = mood as Exclude<MascotMood, 'hidden'>
+
   return (
     <div className="pointer-events-auto fixed bottom-24 right-6 z-40 flex flex-col items-end">
-      {speech && <MascotBubble text={speech} />}
-      <div className="relative">
-        <Lottie animationData={anim} loop={mood !== 'celebrate'} className="h-28 w-28" />
+      {speech && <MascotBubble text={speech} subtitle={taskLabel} />}
+      <MascotProgress stage={stage} status={status} />
+      <div className="relative min-h-[7rem] min-w-[7rem]">
+        <MascotCharacter mood={displayMood} />
         <button
           type="button"
           onClick={dismiss}
-          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[10px] text-slate-600 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300"
+          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary-muted text-[10px] text-muted-fg hover:bg-border"
           aria-label="收起助手"
         >
           ×
@@ -122,24 +183,37 @@ function MascotForJob({ jobId }: InnerProps) {
 }
 
 export function GenerationMascotHost() {
-  const { id: jobIdParam } = useParams<{ id: string }>()
-  const location = useLocation()
-  const chatMatch = location.pathname.match(/^\/chat\/([^/]+)/)
-  const chatId = chatMatch?.[1]
-  const { data: conv } = useConversation(chatId)
+  const { displayJobId, activeJobIds, displayIndex } = useActiveJobs()
+  const enabled = useMascotStore((s) => s.enabled)
+  const dismissed = useMascotStore((s) => s.dismissed)
+  const resetDismiss = useMascotStore((s) => s.resetDismiss)
   const setJob = useMascotStore((s) => s.setJob)
-
-  const activeJobId = useMemo(() => {
-    if (jobIdParam && location.pathname.startsWith('/jobs/')) return jobIdParam
-    if (conv?.status === 'generating' && conv.job_id) return conv.job_id
-    return null
-  }, [jobIdParam, location.pathname, conv?.status, conv?.job_id])
+  const prevActiveCount = useRef(0)
 
   useEffect(() => {
-    setJob(activeJobId)
-  }, [activeJobId, setJob])
+    if (activeJobIds.length > 0 && prevActiveCount.current === 0) {
+      resetDismiss()
+    }
+    prevActiveCount.current = activeJobIds.length
+  }, [activeJobIds.length, resetDismiss])
 
-  if (!activeJobId) return null
+  useEffect(() => {
+    setJob(displayJobId)
+  }, [displayJobId, setJob])
 
-  return <MascotForJob jobId={activeJobId} />
+  if (!enabled) return null
+
+  if (displayJobId && !dismissed) {
+    const taskLabel =
+      activeJobIds.length > 1
+        ? `${displayIndex + 1}/${activeJobIds.length} · ${displayJobId.slice(0, 8)}…`
+        : undefined
+    return <MascotForJob jobId={displayJobId} taskLabel={taskLabel} />
+  }
+
+  if (!displayJobId) {
+    return <MascotIdle />
+  }
+
+  return null
 }

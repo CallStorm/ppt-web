@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { THEMES } from '../../lib/themes'
 import { useAppearanceStore, type ThemeId } from '../../stores/appearanceStore'
+import { useMascotStore } from '../../stores/mascotStore'
+import { HeaderIconButton } from './HeaderIconButton'
+import { IconPalette } from './icons'
 import { cn } from '../../lib/cn'
 
 function ThemePreviewCard({
@@ -49,6 +52,8 @@ function ThemePreviewCard({
 export function AppearancePicker() {
   const theme = useAppearanceStore((s) => s.theme)
   const setTheme = useAppearanceStore((s) => s.setTheme)
+  const mascotEnabled = useMascotStore((s) => s.enabled)
+  const setMascotEnabled = useMascotStore((s) => s.setEnabled)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -63,16 +68,27 @@ export function AppearancePicker() {
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <HeaderIconButton
         type="button"
         aria-label="主题设置"
+        title="主题设置"
+        active={open}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="rounded-[var(--radius-control)] px-2 py-1.5 text-sm text-muted-fg transition-colors hover:bg-primary-muted/40 hover:text-foreground"
       >
-        主题
-      </button>
+        <IconPalette />
+      </HeaderIconButton>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-[var(--radius-panel)] border border-border bg-surface-elevated p-3 shadow-[var(--shadow-panel)]">
+          <label className="mb-3 flex cursor-pointer items-center justify-between gap-2 rounded-[var(--radius-control)] border border-border px-2.5 py-2">
+            <span className="text-xs text-foreground">显示 ForgeBot 助手</span>
+            <input
+              type="checkbox"
+              checked={mascotEnabled}
+              onChange={(e) => setMascotEnabled(e.target.checked)}
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary/30"
+            />
+          </label>
           <p className="mb-2 text-xs font-medium text-muted-fg">选择主题风</p>
           <div className="space-y-2">
             {THEMES.map((t) => (

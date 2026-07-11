@@ -28,6 +28,7 @@ from backend.app.templates import resolve_global_template_path
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
+from sqlalchemy import func, or_
 from backend.paths import ensure_data_dirs, is_under, project_root_for, safe_stage_name, uploads_dir_for
 from backend.runner.preview import find_cover_preview, list_slides
 from backend.runtime import (
@@ -44,6 +45,28 @@ log = logging.getLogger("backend.api.jobs")
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024
+
+
+def _apply_job_list_filters(query, status: str | None, q: str | None):
+    if status == "running":
+        query = query.filter(Job.status.in_(["running", "queued"]))
+    elif status == "paused":
+        query = query.filter(Job.status == "paused")
+    elif status == "done":
+        query = query.filter(Job.status == "done")
+    elif status == "failed":
+        query = query.filter(Job.status.in_(["failed", "cancelled"]))
+
+    term = (q or "").strip()
+    if term:
+        like = f"%{term.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(Job.project_name).like(like),
+                func.lower(Job.prompt).like(like),
+            )
+        )
+    return query
 
 
 @router.post("", status_code=201)
@@ -221,9 +244,12 @@ async def list_jobs(
     user: CurrentUser,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    status: str | None = Query(None, pattern="^(running|paused|done|failed)$"),
+    q: str | None = Query(None, max_length=200),
 ) -> dict:
     with SessionLocal() as s:
         query = s.query(Job).filter(Job.user_id == user.id)
+        query = _apply_job_list_filters(query, status, q)
         total = query.count()
         rows = (
             query.order_by(Job.updated_at.desc())
@@ -236,6 +262,29 @@ async def list_jobs(
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+@router.get("/stats")
+async def job_stats(user: CurrentUser) -> dict:
+    with SessionLocal() as s:
+        rows = (
+            s.query(Job.status, func.count())
+            .filter(Job.user_id == user.id)
+            .group_by(Job.status)
+            .all()
+        )
+    by_status = {status: count for status, count in rows}
+    running = by_status.get("running", 0) + by_status.get("queued", 0)
+    paused = by_status.get("paused", 0)
+    done = by_status.get("done", 0)
+    failed = by_status.get("failed", 0) + by_status.get("cancelled", 0)
+    return {
+        "all": sum(by_status.values()),
+        "running": running,
+        "paused": paused,
+        "done": done,
+        "failed": failed,
     }
 
 

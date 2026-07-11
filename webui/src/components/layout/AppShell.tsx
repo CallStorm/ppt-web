@@ -1,10 +1,14 @@
+import { useLayoutEffect } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { APP_NAME } from '../../lib/brand'
 import { useAuthStore } from '../../stores/authStore'
 import { Badge } from '../ui/Badge'
 import { AppearancePicker } from '../ui/AppearancePicker'
-import { Button } from '../ui/Button'
+import { MascotToggle } from '../mascot/MascotToggle'
+import { HeaderIconButton } from '../ui/HeaderIconButton'
+import { IconLogOut } from '../ui/icons'
 import { cn } from '../../lib/cn'
+import { APP_MAIN_SCROLL_ID, resetMainScroll } from '../../lib/scrollMain'
 
 const navLinkClass = (active: boolean) =>
   cn(
@@ -22,6 +26,10 @@ export function AppShell() {
   const location = useLocation()
   const isChatWorkspace = location.pathname.startsWith('/chat')
   const path = location.pathname
+
+  useLayoutEffect(() => {
+    if (!isChatWorkspace) resetMainScroll()
+  }, [location.pathname, isChatWorkspace])
 
   const handleLogout = async () => {
     await logout()
@@ -44,7 +52,10 @@ export function AppShell() {
           >
             美化 PPT
           </Link>
-          <Link to="/jobs/new" className={cn('rounded-[var(--radius-control)] bg-primary px-3 py-1.5 font-medium text-primary-fg hover:bg-primary-hover')}>
+          <Link
+            to="/jobs/new"
+            className={cn(navLinkClass(path.startsWith('/jobs/new')), 'border border-primary/20')}
+          >
             创建
           </Link>
           {isAdmin() && (
@@ -58,20 +69,34 @@ export function AppShell() {
           <Badge variant="primary">
             <span aria-hidden>◆</span> {me?.quota_credits ?? 0} credits
           </Badge>
-          <AppearancePicker />
-          <Button type="button" variant="ghost" size="sm" onClick={handleLogout} className="text-xs">
-            登出
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <MascotToggle />
+            <AppearancePicker />
+            <HeaderIconButton
+              type="button"
+              title="登出"
+              aria-label="登出"
+              onClick={handleLogout}
+            >
+              <IconLogOut />
+            </HeaderIconButton>
+          </div>
         </div>
       </header>
       <main
-        className={`flex min-h-0 flex-1 flex-col ${
-          isChatWorkspace ? 'overflow-hidden' : 'overflow-y-auto'
-        }`}
+        id={APP_MAIN_SCROLL_ID}
+        className={cn(
+          'min-h-0 flex-1',
+          isChatWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
+        )}
       >
-        <div className={isChatWorkspace ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined}>
+        {isChatWorkspace ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </div>
+        ) : (
           <Outlet />
-        </div>
+        )}
       </main>
     </div>
   )

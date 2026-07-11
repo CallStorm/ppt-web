@@ -2,35 +2,53 @@ import { create } from 'zustand'
 import type { JobStatus } from '../api/types'
 import type { MascotMood } from '../lib/jobStageCopy'
 
+const ENABLED_KEY = 'ppt.mascot.enabled'
+
 interface MascotState {
   jobId: string | null
   status: JobStatus | null
   stage: string | null
   speech: string
   mood: MascotMood
+  enabled: boolean
   dismissed: boolean
   setJob: (jobId: string | null, status?: JobStatus | null) => void
   setProgress: (patch: Partial<Pick<MascotState, 'stage' | 'speech' | 'mood' | 'status'>>) => void
+  setEnabled: (enabled: boolean) => void
+  toggleEnabled: () => void
   dismiss: () => void
   resetDismiss: () => void
+  init: () => void
   clear: () => void
 }
 
-const DISMISS_KEY = 'ppt.mascot.dismissed'
+function readEnabled(): boolean {
+  try {
+    const raw = localStorage.getItem(ENABLED_KEY)
+    if (raw === 'false') return false
+    if (raw === 'true') return true
+  } catch {
+    /* ignore */
+  }
+  return true
+}
 
-export const useMascotStore = create<MascotState>((set) => ({
+function persistEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(ENABLED_KEY, String(enabled))
+  } catch {
+    /* ignore */
+  }
+}
+
+export const useMascotStore = create<MascotState>((set, get) => ({
   jobId: null,
   status: null,
   stage: null,
   speech: '',
   mood: 'hidden',
-  dismissed: (() => {
-    try {
-      return localStorage.getItem(DISMISS_KEY) === '1'
-    } catch {
-      return false
-    }
-  })(),
+  enabled: true,
+  dismissed: false,
 
   setJob: (jobId, status = null) => {
     if (!jobId) {
@@ -42,14 +60,23 @@ export const useMascotStore = create<MascotState>((set) => ({
 
   setProgress: (patch) => set(patch),
 
-  dismiss: () => {
-    localStorage.setItem(DISMISS_KEY, '1')
-    set({ dismissed: true, mood: 'hidden' })
+  setEnabled: (enabled) => {
+    persistEnabled(enabled)
+    set({ enabled, dismissed: enabled ? false : get().dismissed })
   },
 
-  resetDismiss: () => {
-    localStorage.removeItem(DISMISS_KEY)
-    set({ dismissed: false })
+  toggleEnabled: () => {
+    const next = !get().enabled
+    persistEnabled(next)
+    set({ enabled: next, dismissed: false })
+  },
+
+  dismiss: () => set({ dismissed: true }),
+
+  resetDismiss: () => set({ dismissed: false }),
+
+  init: () => {
+    set({ enabled: readEnabled() })
   },
 
   clear: () => set({ jobId: null, status: null, stage: null, speech: '', mood: 'hidden' }),

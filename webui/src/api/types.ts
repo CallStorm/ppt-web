@@ -52,6 +52,14 @@ export interface JobListResponse {
   offset?: number
 }
 
+export interface JobStatsResponse {
+  all: number
+  running: number
+  paused: number
+  done: number
+  failed: number
+}
+
 export interface Slide {
   index: number
   name: string

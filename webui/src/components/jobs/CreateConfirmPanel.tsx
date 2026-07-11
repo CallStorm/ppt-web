@@ -64,7 +64,7 @@ export const CreateConfirmPanel = forwardRef<HTMLElement, Props>(function Create
     <section
       ref={ref}
       id={id}
-      className="rounded-xl border-2 border-gemini-200 bg-gemini-50/40 p-4 shadow-sm dark:border-gemini-800 dark:bg-gemini-950/30"
+      className="scroll-mt-20 rounded-xl border-2 border-gemini-200 bg-gemini-50/40 p-4 shadow-sm dark:border-gemini-800 dark:bg-gemini-950/30"
     >
       <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
         ④ 确认方案

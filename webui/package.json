@@ -12,7 +12,6 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
     "clsx": "^2.1.1",
-    "lottie-react": "^2.4.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",
