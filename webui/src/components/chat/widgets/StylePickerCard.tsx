@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ChatDraft } from '../../../api/types'
+import { Button } from '../../ui/Button'
 import { VisualStyleGallery } from '../../jobs/VisualStyleGallery'
 import type { JobScenario, JobVisualStyle } from '../../../lib/jobOptions'
 import { ImageStrategyCards } from '../../jobs/ImageStrategyCards'
@@ -41,19 +42,9 @@ export function StylePickerCard({ draft, onConfirm, submitting }: Props) {
         />
       </div>
 
-      <button
-        type="button"
-        onClick={() =>
-          onConfirm({
-            visual_style: visualStyle === 'auto' ? null : visualStyle,
-            image_strategy: imageStrategy,
-          })
-        }
-        disabled={submitting}
-        className="mt-4 rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700 disabled:opacity-50"
-      >
+      <Button type="button" onClick={() => onConfirm({ visual_style: visualStyle === 'auto' ? null : visualStyle, image_strategy: imageStrategy })} disabled={submitting} className="mt-4">
         {submitting ? '保存中…' : '确认风格'}
-      </button>
+      </Button>
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { Button } from '../ui/Button'
 import type { EditMode } from './EditModeTabs'
 
 export function EditSubmitFooter({
@@ -39,14 +40,14 @@ export function EditSubmitFooter({
       : `已填意见：${filledCount} / ${slideCount}`
 
   return (
-    <footer className="sticky bottom-0 -mx-6 mt-2 border-t border-slate-200 bg-white/90 px-6 py-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+    <footer className="sticky bottom-0 -mx-6 mt-2 border-t border-border bg-surface-elevated/90 px-6 py-4 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
             checked={confirmed}
             onChange={(e) => onConfirmedChange(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-gemini-500 focus:ring-gemini-500"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
           />
           {confirmLabel}
         </label>
@@ -59,19 +60,14 @@ export function EditSubmitFooter({
                 {slideCount}
               </>
             ) : (
-              <span className={filledCount > 0 ? 'text-gemini-600' : ''}>
+              <span className={filledCount > 0 ? 'text-primary' : ''}>
                 {filledCount > 0 ? countLabel : '请完成表单'}
               </span>
             )}
           </span>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={!canSubmit}
-            className="rounded-md bg-gemini-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-gemini-600 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <Button type="button" onClick={onSubmit} disabled={!canSubmit}>
             {submitLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </footer>

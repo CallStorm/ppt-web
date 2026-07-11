@@ -140,11 +140,11 @@ export function ChatThread({ id }: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {conv && (
-        <header className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-6 py-3 dark:border-slate-800">
-          <h1 className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+        <header className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-elevated/80 px-6 py-3">
+          <h1 className="font-display truncate text-sm font-medium text-foreground">
             {conv.title || '新对话'}
           </h1>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800">
+          <span className="rounded-full bg-primary-muted px-2 py-0.5 text-[10px] text-muted-fg">
             {conv.phase}
           </span>
         </header>
@@ -157,14 +157,14 @@ export function ChatThread({ id }: Props) {
           ))}
 
           {showActiveWidgets && draft && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <div className="rounded-[var(--radius-panel)] border border-border bg-surface-elevated p-4 shadow-[var(--shadow-panel)]">
               <ChatWidgets draft={draft} widgets={activeWidgets} handlers={handlers} />
             </div>
           )}
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-slate-100 bg-white/80 px-4 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80 md:px-8">
+      <footer className="shrink-0 border-t border-border bg-surface-elevated/90 px-4 py-4 backdrop-blur md:px-8">
         <div className="mx-auto max-w-3xl">
           <ChatComposer
             variant="compact"

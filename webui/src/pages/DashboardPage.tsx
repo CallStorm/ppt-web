@@ -10,6 +10,10 @@ import {
 import { useJobsInfinite } from '../hooks/useJobs'
 import type { Job } from '../api/types'
 import { truncate } from '../lib/format'
+import { PageShell } from '../components/ui/PageShell'
+import { Input } from '../components/ui/Input'
+import { Alert } from '../components/ui/Alert'
+import { Button } from '../components/ui/Button'
 
 type Filter = StatusFilterValue
 
@@ -89,68 +93,61 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+    <PageShell width="7xl">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">
             我的作品
-            <span className="ml-2 text-sm font-normal text-slate-400">
+            <span className="ml-2 text-sm font-normal text-muted-fg">
               ({reduced ? `${filtered.length}/${jobs.length}` : jobs.length}
               {total > jobs.length ? `，共 ${total} 条` : ''})
             </span>
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索作品…"
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-gemini-500 focus:outline-none sm:w-56 dark:border-slate-700 dark:bg-slate-800"
+            className="sm:w-56"
           />
           <StatusFilter value={filter} onChange={setFilter} counts={statusCounts} />
         </div>
       </div>
 
       {pausedCount > 0 && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-          <span>
-            你有 {pausedCount} 个作品等待确认，需处理后才能继续生成。
-          </span>
-          <button
-            type="button"
-            onClick={() => setFilter('paused')}
-            className="shrink-0 rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
-          >
-            查看待确认
-          </button>
-        </div>
+        <Alert
+          variant="warning"
+          className="mb-4"
+          actions={
+            <Button type="button" size="sm" className="bg-amber-600 text-white hover:bg-amber-700" onClick={() => setFilter('paused')}>
+              查看待确认
+            </Button>
+          }
+        >
+          你有 {pausedCount} 个作品等待确认，需处理后才能继续生成。
+        </Alert>
       )}
 
       {systemicError && !bannerDismissed && (
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100">
-          <p className="min-w-0 flex-1">
-            <span className="font-medium">{systemicError.count} 个作品</span>
-            因同一原因失败：{truncate(systemicError.msg, 80)}
-          </p>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setFilter('failed')}
-              className="rounded-md bg-rose-600 px-3 py-1 text-xs font-medium text-white hover:bg-rose-700"
-            >
-              只看失败
-            </button>
-            <button
-              type="button"
-              onClick={() => setBannerDismissed(true)}
-              className="rounded-md px-2 py-1 text-xs text-rose-700 hover:bg-rose-100 dark:text-rose-300 dark:hover:bg-rose-900/40"
-              aria-label="关闭提示"
-            >
-              ×
-            </button>
-          </div>
-        </div>
+        <Alert
+          variant="error"
+          className="mb-4"
+          actions={
+            <>
+              <Button type="button" size="sm" className="bg-rose-600 text-white hover:bg-rose-700" onClick={() => setFilter('failed')}>
+                只看失败
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setBannerDismissed(true)} aria-label="关闭提示">
+                ×
+              </Button>
+            </>
+          }
+        >
+          <span className="font-medium">{systemicError.count} 个作品</span>
+          因同一原因失败：{truncate(systemicError.msg, 80)}
+        </Alert>
       )}
 
       {isLoading ? (
@@ -231,6 +228,6 @@ export function DashboardPage() {
           )}
         </>
       )}
-    </div>
+    </PageShell>
   )
 }

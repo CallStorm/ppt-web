@@ -21,16 +21,7 @@ import {
 import { confirmDialog } from '../stores/modalStore'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 
-const STAGES = [
-  '1 解析素材',
-  '2 建项目',
-  '3 策略规划(八点确认)',
-  '5 生图',
-  '6 逐页生成 SVG',
-  '7 质检',
-  '8 后处理',
-  '8 导出 PPTX',
-]
+import { PIPELINE_STAGES, stageFromEvent } from '../lib/jobStageCopy'
 
 type Tab = 'overview' | 'raw' | 'timeline' | 'files'
 
@@ -53,8 +44,9 @@ export function JobDetailPage() {
         if (ev.payload.status === 'paused') {
           setConfirmText(String(ev.payload.pending_confirm || ''))
         }
-      } else if (ev.type === 'stage') {
-        setStage(ev.payload)
+      } else if (ev.type === 'stage' || ev.type === 'tool') {
+        const name = stageFromEvent(ev)
+        if (name) setStage({ stage: name })
       } else if (['tool', 'agent_text', 'result', 'error', 'spec'].includes(ev.type)) {
         setTimeline((prev) => {
           const next = [...prev, ev]
@@ -90,7 +82,7 @@ export function JobDetailPage() {
   const currentStageIdx = useMemo(() => {
     if (!stage) return -1
     const name = String(stage.stage || stage.name || '')
-    return STAGES.findIndex((s) => s === name || s.startsWith(name))
+    return PIPELINE_STAGES.findIndex((s) => s === name || s.startsWith(name))
   }, [stage])
 
   const rawOutputText = useMemo(() => {
@@ -265,7 +257,7 @@ export function JobDetailPage() {
       {job.status === 'running' && currentStageIdx >= 0 && (
         <div className="mb-6">
           <div className="mb-2 flex gap-1">
-            {STAGES.map((s, i) => (
+            {PIPELINE_STAGES.map((s, i) => (
               <div
                 key={s}
                 className={`h-1.5 flex-1 rounded-full ${
@@ -275,7 +267,7 @@ export function JobDetailPage() {
               />
             ))}
           </div>
-          <p className="text-xs text-slate-500">{STAGES[currentStageIdx]}</p>
+          <p className="text-xs text-slate-500">{PIPELINE_STAGES[currentStageIdx]}</p>
         </div>
       )}
 

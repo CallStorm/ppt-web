@@ -22,7 +22,7 @@ export function MessageBubble({ message, draft }: Props) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-3">
         <div className="flex justify-center py-1">
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500 dark:bg-slate-800">
+          <span className="rounded-full bg-primary-muted px-3 py-1 text-xs text-muted-fg">
             {message.content}
           </span>
         </div>
@@ -41,10 +41,10 @@ export function MessageBubble({ message, draft }: Props) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[min(100%,42rem)] rounded-2xl px-4 py-3 ${
+        className={`max-w-[min(100%,42rem)] rounded-[var(--radius-panel)] px-4 py-3 ${
           isUser
-            ? 'bg-gemini-600 text-white'
-            : 'border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
+            ? 'bg-primary text-primary-fg'
+            : 'border border-border bg-surface-elevated text-foreground'
         }`}
       >
         {message.content && (

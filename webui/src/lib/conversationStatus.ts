@@ -37,10 +37,10 @@ export function conversationStatusVisual(c: Conversation): ConvListVisual {
 export function conversationRowAccent(kind: ConvListVisualKind): string {
   switch (kind) {
     case 'running':
-      return 'border-l-2 border-l-blue-400'
+      return 'border-l-primary/50'
     case 'failed':
-      return 'border-l-2 border-l-rose-400'
+      return 'border-l-danger/50'
     default:
-      return 'border-l-2 border-l-transparent'
+      return 'border-l-transparent'
   }
 }

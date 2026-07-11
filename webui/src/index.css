@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
-
 @theme {
   --color-gemini-50: #e8f0fe;
   --color-gemini-100: #d2e3fc;
@@ -13,7 +11,117 @@
   --color-gemini-700: #1967d2;
   --color-gemini-800: #185abc;
   --color-gemini-900: #174ea6;
-  --font-sans: Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+@theme inline {
+  --color-primary: var(--ds-primary);
+  --color-primary-hover: var(--ds-primary-hover);
+  --color-primary-muted: var(--ds-primary-muted);
+  --color-primary-fg: var(--ds-primary-fg);
+  --color-accent: var(--ds-accent);
+  --color-accent-muted: var(--ds-accent-muted);
+  --color-surface: var(--ds-surface);
+  --color-surface-elevated: var(--ds-surface-elevated);
+  --color-sidebar: var(--ds-sidebar-bg);
+  --color-border: var(--ds-border);
+  --color-foreground: var(--ds-text);
+  --color-muted-fg: var(--ds-muted-fg);
+  --color-danger: var(--ds-danger);
+  --color-danger-hover: var(--ds-danger-hover);
+  --font-display: var(--ds-font-display);
+  --font-sans: var(--ds-font-body);
+  --radius-control: var(--ds-radius-control);
+  --radius-panel: var(--ds-radius-panel);
+  --shadow-panel: var(--ds-shadow-panel);
+  --shadow-button: var(--ds-shadow-button);
+}
+
+/* ── modern（默认） ── */
+:root,
+[data-theme="modern"] {
+  --ds-primary: #1a73e8;
+  --ds-primary-hover: #1967d2;
+  --ds-primary-muted: #e8f0fe;
+  --ds-primary-fg: #ffffff;
+  --ds-accent: #7c3aed;
+  --ds-accent-muted: #ede9fe;
+  --ds-surface: #f8fafc;
+  --ds-surface-elevated: #ffffff;
+  --ds-sidebar-bg: #f1f5f9;
+  --ds-border: #e2e8f0;
+  --ds-text: #0f172a;
+  --ds-muted-fg: #64748b;
+  --ds-danger: #e11d48;
+  --ds-danger-hover: #be123c;
+  --ds-input-bg: #ffffff;
+  --ds-input-border: #e2e8f0;
+  --ds-font-display: Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-font-body: Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-radius-control: 0.5rem;
+  --ds-radius-panel: 0.75rem;
+  --ds-shadow-panel: 0 1px 3px rgb(0 0 0 / 0.06);
+  --ds-shadow-button: 0 1px 2px rgb(0 0 0 / 0.05);
+  --ds-page-bg: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --ds-sidebar-pattern: none;
+  --ds-btn-radius: var(--ds-radius-control);
+}
+
+/* ── forest 森林 ── */
+[data-theme="forest"] {
+  --ds-primary: #2d6a4f;
+  --ds-primary-hover: #1b4332;
+  --ds-primary-muted: #d8f3dc;
+  --ds-primary-fg: #ffffff;
+  --ds-accent: #52b788;
+  --ds-accent-muted: #b7e4c7;
+  --ds-surface: #f0f7f4;
+  --ds-surface-elevated: #ffffff;
+  --ds-sidebar-bg: linear-gradient(180deg, #e8f5e9 0%, #d4ead9 100%);
+  --ds-border: #a7d7b8;
+  --ds-text: #1b4332;
+  --ds-muted-fg: #52796f;
+  --ds-danger: #c1121f;
+  --ds-danger-hover: #9b0d18;
+  --ds-input-bg: #f1f8f4;
+  --ds-input-border: #a7d7b8;
+  --ds-font-display: "Nunito", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-font-body: "Nunito", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-radius-control: 9999px;
+  --ds-radius-panel: 1rem;
+  --ds-shadow-panel: 0 4px 14px rgb(45 106 79 / 0.1);
+  --ds-shadow-button: 0 2px 8px rgb(45 106 79 / 0.2);
+  --ds-page-bg: linear-gradient(180deg, #f0f7f4 0%, #e8f5e9 100%);
+  --ds-sidebar-pattern: none;
+  --ds-btn-radius: 9999px;
+}
+
+/* ── guofeng 古风 ── */
+[data-theme="guofeng"] {
+  --ds-primary: #b5423a;
+  --ds-primary-hover: #8c332c;
+  --ds-primary-muted: #f5e6e4;
+  --ds-primary-fg: #fffef8;
+  --ds-accent: #c4a574;
+  --ds-accent-muted: #f0e6d2;
+  --ds-surface: #f7f3e9;
+  --ds-surface-elevated: #fffef8;
+  --ds-sidebar-bg: linear-gradient(180deg, #f3ead8 0%, #ebe1cc 100%);
+  --ds-border: #d4c4a8;
+  --ds-text: #3d2f1f;
+  --ds-muted-fg: #7a6b55;
+  --ds-danger: #9b2226;
+  --ds-danger-hover: #7a1c1f;
+  --ds-input-bg: #fffef8;
+  --ds-input-border: #c4a574;
+  --ds-font-display: "Noto Serif SC", STSong, "Songti SC", serif;
+  --ds-font-body: "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-radius-control: 0.25rem;
+  --ds-radius-panel: 0.25rem;
+  --ds-shadow-panel: 0 1px 0 rgb(196 165 116 / 0.35);
+  --ds-shadow-button: inset 0 0 0 1px rgb(196 165 116 / 0.5);
+  --ds-page-bg: linear-gradient(180deg, #f7f3e9 0%, #f0e9d8 100%);
+  --ds-sidebar-pattern: none;
+  --ds-btn-radius: 0.25rem;
 }
 
 html,
@@ -23,27 +131,61 @@ body,
 }
 
 body {
-  font-family: var(--font-sans);
-  @apply overflow-hidden bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  font-family: var(--ds-font-body);
+  color: var(--ds-text);
+  background: var(--ds-page-bg);
+  @apply overflow-hidden antialiased;
+}
+
+.theme-sidebar {
+  background: var(--ds-sidebar-bg);
+}
+
+.theme-page {
+  background: var(--ds-page-bg);
+}
+
+.theme-input {
+  background-color: var(--ds-input-bg);
+  border-color: var(--ds-input-border);
+}
+
+[data-theme="guofeng"] .theme-input {
+  border-radius: 0;
+  border-width: 0 0 1px 0;
+  background-color: transparent;
+}
+
+[data-theme="guofeng"] .theme-input:focus-visible {
+  border-bottom-color: var(--ds-primary);
+  box-shadow: none;
+}
+
+.theme-btn-primary {
+  border-radius: var(--ds-btn-radius);
+  box-shadow: var(--ds-shadow-button);
+}
+
+.font-display {
+  font-family: var(--ds-font-display);
 }
 
 .status-pill {
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
 }
-.status-queued { @apply bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300; }
-.status-running { @apply bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300; }
-.status-paused { @apply bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200; }
-.status-done { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300; }
-.status-failed { @apply bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300; }
-.status-cancelled { @apply bg-slate-50 text-slate-400 line-through dark:bg-slate-800/60 dark:text-slate-500; }
+.status-queued { @apply bg-slate-100 text-slate-600; }
+.status-running { @apply bg-blue-100 text-blue-700; }
+.status-paused { @apply bg-amber-100 text-amber-800; }
+.status-done { @apply bg-emerald-100 text-emerald-700; }
+.status-failed { @apply bg-rose-100 text-rose-700; }
+.status-cancelled { @apply bg-slate-50 text-slate-400 line-through; }
 
 .queue-badge {
-  @apply inline-flex items-center rounded px-1.5 py-0.5 text-xs font-mono
-         bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300;
+  @apply inline-flex items-center rounded px-1.5 py-0.5 text-xs font-mono bg-accent-muted text-accent;
 }
 
 .status-running-dot {
-  @apply mr-1 inline-block h-1.5 w-1.5 rounded-full bg-blue-500;
+  @apply mr-1 inline-block h-1.5 w-1.5 rounded-full bg-primary;
   animation: pulse-ring 1.2s ease-in-out infinite;
 }
 
@@ -57,12 +199,9 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
-.status-running-pulse {
-  animation: pulse-ring 2s ease-in-out infinite;
-}
 
 .conv-status-running {
-  @apply bg-blue-500;
+  @apply bg-primary;
   animation: pulse-ring 1.2s ease-in-out infinite;
 }
 .conv-status-needs-input {
@@ -85,7 +224,8 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }
-.dark .skeleton-shimmer {
-  background: linear-gradient(90deg, rgb(30 41 59) 25%, rgb(51 65 85) 50%, rgb(30 41 59) 75%);
-  background-size: 200% 100%;
+
+@keyframes mascot-talk {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.85); }
 }

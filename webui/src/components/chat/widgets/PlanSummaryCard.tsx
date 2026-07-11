@@ -1,3 +1,4 @@
+import { Button } from '../../ui/Button'
 import type { ChatDraft } from '../../../api/types'
 import { formatBasicsSummary, formatVisualSummary, estimateGenerationMinutes } from '../../../lib/createPlan'
 import type { JobOptions } from '../../../lib/jobOptions'
@@ -48,14 +49,15 @@ export function PlanSummaryCard({ draft, canGenerate, onGenerate, generating }: 
       <p className="mt-3 text-xs text-slate-500">
         预计 {min}–{max} 分钟 · 确认后将扣除 1 credit 并开始生成
       </p>
-      <button
+      <Button
         type="button"
         onClick={onGenerate}
         disabled={!canGenerate || generating}
-        className="mt-4 w-full rounded-md bg-gemini-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gemini-700 disabled:opacity-50"
+        fullWidth
+        className="mt-4"
       >
         {generating ? '提交中…' : '开始生成'}
-      </button>
+      </Button>
     </div>
   )
 }

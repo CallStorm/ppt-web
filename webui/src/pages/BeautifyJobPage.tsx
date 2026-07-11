@@ -8,8 +8,9 @@ import { invalidateJobLists } from '../hooks/useJobs'
 import { TemplateGallery } from '../components/templates/TemplateGallery'
 import type { TemplateCatalogEntry, TemplateUsage } from '../lib/jobOptions'
 
-const PANEL_CLASS =
-  'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/40'
+import { panelClassName } from '../components/ui/Card'
+
+const PANEL_CLASS = panelClassName
 
 const PPTX_ACCEPT =
   '.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation'

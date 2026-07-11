@@ -11,8 +11,9 @@ import {
 import { PAGE_COUNT_MAX, PAGE_COUNT_MIN } from '../../lib/jobOptions'
 import { VisualStyleSummaryThumb } from './VisualStyleGallery'
 
-const SELECT_CLASS =
-  'rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800'
+import { selectClassName } from '../ui/Select'
+
+const SELECT_CLASS = selectClassName
 
 const PAGE_COUNT_OPTIONS = Array.from(
   { length: PAGE_COUNT_MAX - PAGE_COUNT_MIN + 1 },

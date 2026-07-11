@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import type { ChatDraft, ChatRequirements } from '../../../api/types'
 import { SCENARIO_OPTIONS, PAGE_COUNT_MIN, PAGE_COUNT_MAX } from '../../../lib/jobOptions'
+import { Button } from '../../ui/Button'
+import { Input } from '../../ui/Input'
+import { Select } from '../../ui/Select'
+import { Textarea } from '../../ui/Textarea'
 
 type Props = {
   draft: ChatDraft
@@ -35,18 +39,14 @@ export function RequirementFormCard({ draft, onSubmit, submitting }: Props) {
   }
 
   return (
-    <div className="mt-3 rounded-xl border border-gemini-200 bg-white p-4 dark:border-gemini-800 dark:bg-slate-900/60">
+    <div className="mt-3 rounded-[var(--radius-panel)] border border-primary/20 bg-surface-elevated p-4">
       <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">内容需求单</h3>
-      <p className="mt-1 text-xs text-slate-500">填写后我将为你生成大纲初稿</p>
+      <p className="mt-1 text-xs text-muted-fg">填写后我将为你生成大纲初稿</p>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-slate-500">计划页数</span>
-          <select
-            value={pageCount}
-            onChange={(e) => setPageCount(Number(e.target.value))}
-            className="rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
-          >
+          <span className="text-muted-fg">计划页数</span>
+          <Select value={pageCount} onChange={(e) => setPageCount(Number(e.target.value))}>
             {Array.from({ length: PAGE_COUNT_MAX - PAGE_COUNT_MIN + 1 }, (_, i) => {
               const n = PAGE_COUNT_MIN + i
               return (
@@ -55,21 +55,17 @@ export function RequirementFormCard({ draft, onSubmit, submitting }: Props) {
                 </option>
               )
             })}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-slate-500">使用场景</span>
-          <select
-            value={scenario}
-            onChange={(e) => setScenario(e.target.value)}
-            className="rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
-          >
+          <span className="text-muted-fg">使用场景</span>
+          <Select value={scenario} onChange={(e) => setScenario(e.target.value)}>
             {SCENARIO_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
 
@@ -78,6 +74,7 @@ export function RequirementFormCard({ draft, onSubmit, submitting }: Props) {
           type="checkbox"
           checked={needImages}
           onChange={(e) => setNeedImages(e.target.checked)}
+          className="rounded border-border text-primary focus:ring-primary"
         />
         需要配图（网络搜索素材）
       </label>
@@ -85,8 +82,8 @@ export function RequirementFormCard({ draft, onSubmit, submitting }: Props) {
       <div className="mt-4 space-y-3">
         {answers.map((item, idx) => (
           <label key={idx} className="block text-xs">
-            <span className="text-slate-500">{item.question}</span>
-            <input
+            <span className="text-muted-fg">{item.question}</span>
+            <Input
               type="text"
               value={item.answer}
               onChange={(e) => {
@@ -94,30 +91,25 @@ export function RequirementFormCard({ draft, onSubmit, submitting }: Props) {
                 next[idx] = { ...item, answer: e.target.value }
                 setAnswers(next)
               }}
-              className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="mt-1"
             />
           </label>
         ))}
       </div>
 
       <label className="mt-3 block text-xs">
-        <span className="text-slate-500">补充说明（可选）</span>
-        <textarea
+        <span className="text-muted-fg">补充说明（可选）</span>
+        <Textarea
           value={extraNotes}
           onChange={(e) => setExtraNotes(e.target.value)}
           rows={2}
-          className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
+          className="mt-1"
         />
       </label>
 
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="mt-4 rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700 disabled:opacity-50"
-      >
+      <Button type="button" onClick={handleSubmit} disabled={submitting} className="mt-4">
         {submitting ? '提交中…' : '确认需求，生成大纲'}
-      </button>
+      </Button>
     </div>
   )
 }

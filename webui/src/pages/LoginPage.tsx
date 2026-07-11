@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { APP_NAME } from '../lib/brand'
 import { useAuthStore } from '../stores/authStore'
+import { AppearancePicker, ThemePickerInline } from '../components/ui/AppearancePicker'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { Input } from '../components/ui/Input'
 
 export function LoginPage() {
   const me = useAuthStore((s) => s.me)
@@ -18,7 +22,7 @@ export function LoginPage() {
 
   if (!booted) {
     return (
-      <div className="flex h-screen items-center justify-center text-slate-400">载入中…</div>
+      <div className="flex h-screen items-center justify-center bg-surface text-muted-fg">载入中…</div>
     )
   }
 
@@ -37,73 +41,71 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex h-14 items-center border-b border-slate-200 px-6 dark:border-slate-800">
-        <span className="text-lg font-semibold">{APP_NAME}</span>
+    <div className="theme-page flex min-h-screen flex-col">
+      <header className="flex h-14 items-center justify-between border-b border-border bg-surface-elevated/90 px-6 backdrop-blur">
+        <span className="font-display text-lg font-semibold text-foreground">{APP_NAME}</span>
+        <AppearancePicker />
       </header>
       <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-md dark:bg-slate-900">
-          <h1 className="mb-1 text-xl font-semibold">{mode === 'login' ? '登录' : '注册'}</h1>
-          <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">
+        <Card className="w-full max-w-sm shadow-md" padding="lg">
+          <h1 className="font-display mb-1 text-xl font-semibold">{mode === 'login' ? '登录' : '注册'}</h1>
+          <p className="mb-5 text-sm text-muted-fg">
             {mode === 'login' ? '邮箱或账号（如 admin）' : '创建账号，需有效邮箱'}
           </p>
           <form onSubmit={submit} className="space-y-3">
             <label className="block">
-              <span className="text-xs text-slate-500 dark:text-slate-400">
+              <span className="text-xs text-muted-fg">
                 {mode === 'login' ? '邮箱 / 账号' : '邮箱'}
               </span>
-              <input
+              <Input
                 type="text"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="username"
                 placeholder={mode === 'login' ? 'admin 或 you@example.com' : 'you@example.com'}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 focus:border-gemini-500 focus:outline-none focus:ring-2 focus:ring-gemini-500/30 dark:border-slate-700 dark:bg-slate-800"
+                className="mt-1"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-slate-500 dark:text-slate-400">密码</span>
-              <input
+              <span className="text-xs text-muted-fg">密码</span>
+              <Input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 minLength={mode === 'register' ? 6 : undefined}
-                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 focus:border-gemini-500 focus:outline-none focus:ring-2 focus:ring-gemini-500/30 dark:border-slate-700 dark:bg-slate-800"
+                className="mt-1"
               />
               {mode === 'login' && (
-                <p className="mt-1 text-xs text-slate-400">默认管理员：admin / admin</p>
+                <p className="mt-1 text-xs text-muted-fg">默认管理员：admin / admin</p>
               )}
             </label>
-            {error && <p className="text-xs text-rose-600">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-gemini-600 px-3 py-2 text-sm font-medium text-white hover:bg-gemini-700 disabled:opacity-50"
-            >
+            {error && <p className="text-xs text-danger">{error}</p>}
+            <Button type="submit" disabled={loading} fullWidth size="lg">
               {loading ? '处理中…' : mode === 'login' ? '登录' : '注册'}
-            </button>
+            </Button>
           </form>
-          <p className="mt-4 text-center text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-4 text-center text-xs text-muted-fg">
             {mode === 'login' ? (
               <>
                 没有账号？{' '}
-                <button type="button" onClick={() => setMode('register')} className="text-gemini-600 hover:underline">
+                <Button type="button" variant="link" size="sm" onClick={() => setMode('register')}>
                   注册
-                </button>
+                </Button>
               </>
             ) : (
               <>
                 已有账号？{' '}
-                <button type="button" onClick={() => setMode('login')} className="text-gemini-600 hover:underline">
+                <Button type="button" variant="link" size="sm" onClick={() => setMode('login')}>
                   登录
-                </button>
+                </Button>
               </>
             )}
           </p>
-        </div>
+          <ThemePickerInline className="mt-6" />
+        </Card>
       </main>
     </div>
   )

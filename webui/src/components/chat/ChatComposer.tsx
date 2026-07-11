@@ -36,11 +36,11 @@ export function ChatComposer({
   return (
     <div className={isHero ? 'w-full max-w-2xl' : 'w-full'}>
       {files.length > 0 && (
-        <p className="mb-2 text-xs text-slate-500">
+        <p className="mb-2 text-xs text-muted-fg">
           附件：{files.map((f) => f.name).join(', ')}
           <button
             type="button"
-            className="ml-2 text-rose-500"
+            className="ml-2 text-danger"
             onClick={() => onFilesChange([])}
           >
             清除
@@ -48,7 +48,7 @@ export function ChatComposer({
         </p>
       )}
       <div
-        className={`relative rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 ${
+        className={`relative rounded-2xl border border-border bg-surface-elevated shadow-[var(--shadow-panel)] ${
           isHero ? 'min-h-[140px] px-5 py-4' : 'px-3 py-2'
         }`}
       >
@@ -59,7 +59,7 @@ export function ChatComposer({
           disabled={disabled}
           rows={isHero ? 3 : 2}
           placeholder={placeholder}
-          className={`w-full resize-none border-0 bg-transparent text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 dark:text-slate-100 ${
+          className={`w-full resize-none border-0 bg-transparent text-foreground placeholder:text-muted-fg focus:outline-none focus:ring-0 ${
             isHero ? 'text-base' : 'text-sm'
           }`}
         />
@@ -68,7 +68,7 @@ export function ChatComposer({
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={disabled}
-            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+            className="rounded-[var(--radius-control)] p-2 text-muted-fg transition hover:bg-primary-muted/40 hover:text-foreground"
             aria-label="添加附件"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -86,7 +86,7 @@ export function ChatComposer({
             type="button"
             onClick={onSend}
             disabled={disabled || sending || (!value.trim() && files.length === 0)}
-            className={`flex items-center justify-center rounded-full bg-slate-900 text-white transition hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white ${
+            className={`flex items-center justify-center rounded-full bg-primary text-primary-fg transition hover:bg-primary-hover disabled:opacity-40 ${
               isHero ? 'h-10 w-10' : 'h-9 w-9'
             }`}
             aria-label="发送"

@@ -5,7 +5,8 @@ import { AppRoutes } from './router'
 import { ToastHost } from './components/ui/Toast'
 import { ModalHost } from './components/ui/Modal'
 import { useAuthStore } from './stores/authStore'
-import { useThemeStore } from './stores/themeStore'
+import { useAppearanceStore } from './stores/appearanceStore'
+import { GenerationMascotHost } from './components/mascot/GenerationMascot'
 import { setDisplayTimezone } from './lib/format'
 
 const queryClient = new QueryClient({
@@ -16,10 +17,10 @@ const queryClient = new QueryClient({
 
 function Boot() {
   const boot = useAuthStore((s) => s.boot)
-  const initTheme = useThemeStore((s) => s.init)
+  const initAppearance = useAppearanceStore((s) => s.init)
 
   useEffect(() => {
-    initTheme()
+    initAppearance()
     boot()
     fetch('/api/health')
       .then((r) => (r.ok ? r.json() : null))
@@ -27,11 +28,12 @@ function Boot() {
         if (data?.display_timezone) setDisplayTimezone(data.display_timezone)
       })
       .catch(() => {})
-  }, [boot, initTheme])
+  }, [boot, initAppearance])
 
   return (
     <>
       <AppRoutes />
+      <GenerationMascotHost />
       <ToastHost />
       <ModalHost />
     </>

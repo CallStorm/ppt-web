@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '../../ui/Button'
 import type { OutlineItem } from '../../../api/types'
 
 type Props = {
@@ -33,7 +34,7 @@ export function OutlineBoardCard({ outline, editable = true, onConfirm, submitti
   }
 
   return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/60">
+    <div className="mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-elevated p-4 shadow-[var(--shadow-panel)]">
       <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">大纲</h3>
       <p className="mt-1 text-xs text-slate-500">
         {editable ? '可编辑章节标题，确认后继续选择风格' : '章节列表'}
@@ -43,7 +44,7 @@ export function OutlineBoardCard({ outline, editable = true, onConfirm, submitti
         {items.map((item, idx) => (
           <li
             key={item.id}
-            className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-800/50"
+            className="flex items-center gap-2 rounded-[var(--radius-control)] border border-border bg-primary-muted/20 px-3 py-2"
           >
             <span className="text-xs text-slate-400 w-6">{idx + 1}</span>
             {editable ? (
@@ -51,7 +52,7 @@ export function OutlineBoardCard({ outline, editable = true, onConfirm, submitti
                 type="text"
                 value={item.title}
                 onChange={(e) => updateTitle(idx, e.target.value)}
-                className="flex-1 rounded border-0 bg-transparent text-sm focus:ring-1 focus:ring-gemini-500"
+            className="flex-1 rounded border-0 bg-transparent text-sm text-foreground focus:ring-1 focus:ring-primary"
               />
             ) : (
               <span className="flex-1 text-sm">{item.title}</span>
@@ -79,14 +80,9 @@ export function OutlineBoardCard({ outline, editable = true, onConfirm, submitti
             + 加一页
           </button>
           {onConfirm && (
-            <button
-              type="button"
-              onClick={() => onConfirm(items)}
-              disabled={submitting}
-              className="rounded-md bg-gemini-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-gemini-700 disabled:opacity-50"
-            >
+            <Button type="button" size="sm" onClick={() => onConfirm(items)} disabled={submitting}>
               {submitting ? '保存中…' : '确认大纲，继续'}
-            </button>
+            </Button>
           )}
         </div>
       )}

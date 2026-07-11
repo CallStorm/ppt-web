@@ -13,13 +13,13 @@ export function ChatWorkspacePage() {
   const conversations = data?.conversations ?? []
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-white dark:bg-slate-950">
+    <div className="theme-page flex min-h-0 flex-1 overflow-hidden">
       <ChatSidebar
         conversations={conversations}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
       />
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-slate-950">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         {id ? <ChatThread id={id} /> : <ChatHomeHero />}
       </main>
     </div>

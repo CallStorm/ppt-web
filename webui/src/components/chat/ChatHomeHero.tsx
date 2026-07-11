@@ -34,11 +34,11 @@ export function ChatHomeHero() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overscroll-y-contain px-6 pb-16">
-      <h1 className="text-center text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+    <div className="theme-page flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overscroll-y-contain px-6 pb-16">
+      <h1 className="font-display text-center text-3xl font-semibold tracking-tight text-foreground">
         {chatGreeting()}，有什么 PPT 需要我做？
       </h1>
-      <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
+      <p className="mt-3 text-center text-sm text-muted-fg">
         AI 生成定制级、可编辑的 PPT
       </p>
       <div className="mt-10 w-full flex justify-center">

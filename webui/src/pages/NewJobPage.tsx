@@ -30,8 +30,8 @@ import {
 } from '../lib/jobOptions'
 import { pickHint } from '../lib/aiHints'
 
-const SELECT_CLASS =
-  'w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800'
+import { panelClassName } from '../components/ui/Card'
+import { selectClassName } from '../components/ui/Select'
 
 function OptionSelect<T extends string>({
   label,
@@ -52,7 +52,7 @@ function OptionSelect<T extends string>({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className={SELECT_CLASS}
+        className={selectClassName}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -66,8 +66,7 @@ function OptionSelect<T extends string>({
 
 type CreateMode = 'topic' | 'document'
 
-const PANEL_CLASS =
-  'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/40'
+const PANEL_CLASS = panelClassName
 
 const SECTION_HEADER =
   'flex w-full items-center justify-between text-left text-sm font-medium text-slate-700 dark:text-slate-200'
