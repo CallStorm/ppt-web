@@ -33,7 +33,6 @@ jobs.db-*
 
 # 文档（不进镜像）
 *.md
-!ppt-master/**/*.md
 README.md
 DESIGN.md
 

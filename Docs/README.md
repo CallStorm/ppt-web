@@ -4,7 +4,7 @@
 
 ppt-web 是基于 [ppt-master](https://github.com/hugohe3/ppt-master) 的在线 PPT 生成服务。
 
-> **启动前**：需 Docker 启动 MySQL + 构建 ppt-runner 镜像（见 [README](../README.md) 快速开始）。
+> **启动前**：需 Docker 启动 MySQL + 构建 ppt-runner 镜像（见 [README](../README.md) 快速开始）。上游 [ppt-master](https://github.com/hugohe3/ppt-master) 在镜像 build 时或本地 `scripts/ensure-ppt-master.sh` 自动 clone，不再使用 git submodule。
 
 ## 文档列表
 
