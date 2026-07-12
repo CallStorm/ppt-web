@@ -37,9 +37,9 @@ ColorMode = Literal["auto", "brand", "industry"]
 ImageStrategy = Literal["ai", "web", "provided", "placeholder", "none"]
 IconStrategy = Literal["emoji", "library", "ai", "custom"]
 FormulaPolicy = Literal["mixed", "render-all", "text-only"]
-JobType = Literal["generate", "beautify"]
+JobType = Literal["generate", "beautify", "template_create"]
 TemplateKind = Literal["deck", "layout"]
-TemplateScope = Literal["global"]
+TemplateScope = Literal["system", "global", "user"]
 TemplateUsage = Literal["adaptive", "strict"]
 
 # visual_style：ppt-master 全量 18 预设 + auto（auto = 由 AI 推荐）
@@ -184,7 +184,7 @@ class RevisionRequest(BaseModel):
 
 
 class TemplateRef(BaseModel):
-    scope: TemplateScope = "global"
+    scope: TemplateScope = "system"
     kind: TemplateKind
     id: str = Field(min_length=1, max_length=128)
 
@@ -220,6 +220,10 @@ class JobOptions(BaseModel):
     split_mode: bool = False
     glossary: dict[str, str] | None = None
 
+    # template_create job metadata
+    template_record_id: str | None = None
+    template_staging_id: str | None = None
+
     # ── 修改（revisions） ────────────────────────────────
     # 当本 job 是对另一个已完成 job 的修改版时，由 queue_revision 写入；
     # 普通新建 job 此字段为 None。前端从 GET /jobs/{id}/revisions 取链。
@@ -254,6 +258,8 @@ class JobOptions(BaseModel):
         if self.job_type == "beautify":
             if self.template is None:
                 raise ValueError("job_type=beautify requires template")
+        elif self.job_type == "template_create":
+            pass
         elif self.template is not None:
             raise ValueError("template is only valid for job_type=beautify")
 
@@ -369,6 +375,7 @@ def parse_job_options(raw: str | None) -> JobOptions | None:
 def job_options_from_form(
     *,
     job_type: str = "generate",
+    template_scope: str | None = None,
     template_kind: str | None = None,
     template_id: str | None = None,
     template_usage: str = "adaptive",
@@ -394,7 +401,7 @@ def job_options_from_form(
 ) -> JobOptions:
     # visual_style="auto" 等价于 None（让 agent 自己挑）
     vs = visual_style if visual_style and visual_style != "auto" else None
-    jt: JobType = job_type if job_type in ("generate", "beautify") else "generate"
+    jt: JobType = job_type if job_type in ("generate", "beautify", "template_create") else "generate"
     template: TemplateRef | None = None
     if jt == "beautify":
         if not template_kind or not template_id:
@@ -403,7 +410,10 @@ def job_options_from_form(
             raise ValueError(f"template_kind must be deck or layout, got {template_kind!r}")
         if template_usage not in ("adaptive", "strict"):
             raise ValueError(f"template_usage must be adaptive or strict, got {template_usage!r}")
-        template = TemplateRef(kind=template_kind, id=template_id.strip())
+        tscope: TemplateScope = "system"
+        if template_scope in ("system", "global", "user"):
+            tscope = template_scope  # type: ignore[assignment]
+        template = TemplateRef(scope=tscope, kind=template_kind, id=template_id.strip())
     return JobOptions(
         job_type=jt,
         template=template,
@@ -566,7 +576,7 @@ def format_beautify_options_for_prompt(
         "PPT 美化要求（模板套用模式，请严格遵循）：",
         "",
         f"- 选中模板目录（容器内）: {container_template_path}",
-        f"- 模板类型: {opts.template.kind} / ID: {opts.template.id}",
+        f"- 模板类型: {opts.template.kind} / scope: {opts.template.scope} / ID: {opts.template.id}",
         f"- 模板使用模式: {usage}（adaptive=按 page_type 为每源页选最匹配版式并可复用 content 版式；strict=保持所选 Layout 契约不变）",
         "",
         "【内容不变量 — beautify 硬约束】",

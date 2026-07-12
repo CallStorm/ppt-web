@@ -53,6 +53,12 @@ export function AppShell() {
             美化 PPT
           </Link>
           <Link
+            to="/templates"
+            className={cn(navLinkClass(path.startsWith('/templates')), 'border border-primary/20')}
+          >
+            模板库
+          </Link>
+          <Link
             to="/jobs/new"
             className={cn(navLinkClass(path.startsWith('/jobs/new')), 'border border-primary/20')}
           >

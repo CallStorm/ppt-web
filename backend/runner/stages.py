@@ -3,6 +3,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from backend.paths import translate_paths_for_container
+
+if TYPE_CHECKING:
+    from backend.api.schemas.job_options import JobOptions
 
 STAGE_RULES: list[tuple[callable, str]] = [
     (lambda c, f, w: "source_to_md" in c, "1 解析素材"),
@@ -60,16 +66,112 @@ def resolve_project_dir(project_name: str, root: Path) -> Path | None:
     return max(hits, key=lambda p: p.stat().st_mtime)
 
 
-def find_pptx(root: Path) -> Path | None:
-    """在 per-user project_root 下递归找最新导出的 pptx。
+def find_pptx(
+    root: Path,
+    *,
+    project_name: str | None = None,
+    beautify: bool = False,
+) -> Path | None:
+    """Find the best downloadable PPTX under a per-user project_root.
 
-    root 是 `data/users/<uid>/projects/<job_id>/`，pptx 通常在
-    `<root>/projects/<name>_<format>_<date>/exports/*.pptx`。
+    root is ``data/users/<uid>/projects/<job_id>/``. Exported decks normally
+    live in ``<project>/exports/*.pptx``.
+
+    ``sources/`` and ``templates/`` are never returned — beautify jobs always
+    import the source deck into ``sources/``, and those copies must not be
+    treated as successful output.
+
+    When ``beautify=True``, only ``exports/*.pptx`` is considered.
     """
     if not root or not root.exists():
         return None
-    hits = sorted(root.rglob("*.pptx"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return hits[0] if hits else None
+
+    export_hits = _export_pptx_hits(root, project_name=project_name)
+    if beautify:
+        return export_hits[0] if export_hits else None
+    if export_hits:
+        return export_hits[0]
+
+    other_hits = _other_pptx_hits(root)
+    return other_hits[0] if other_hits else None
+
+
+_EXCLUDED_PPTX_DIRS = frozenset({"sources", "templates"})
+
+
+def _export_pptx_hits(root: Path, *, project_name: str | None = None) -> list[Path]:
+    """Newest-first PPTX files under any ``exports/`` directory."""
+    hits: list[Path] = []
+    if project_name:
+        project_dir = resolve_project_dir(project_name, root=root)
+        if project_dir:
+            exp = project_dir / "exports"
+            if exp.is_dir():
+                hits.extend(exp.glob("*.pptx"))
+    for p in root.rglob("*.pptx"):
+        if "exports" not in p.parts:
+            continue
+        if p not in hits:
+            hits.append(p)
+    return sorted(hits, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _other_pptx_hits(root: Path) -> list[Path]:
+    """Newest-first PPTX outside excluded dirs and outside exports."""
+    hits: list[Path] = []
+    for p in root.rglob("*.pptx"):
+        rel_parts = p.relative_to(root).parts
+        if set(rel_parts) & _EXCLUDED_PPTX_DIRS:
+            continue
+        if "exports" in rel_parts:
+            continue
+        hits.append(p)
+    return sorted(hits, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def beautify_expected_slide_count(project_dir: Path | None) -> int | None:
+    """Read planned slide count from beautify analysis artifacts."""
+    if not project_dir or not project_dir.is_dir():
+        return None
+    inv_path = project_dir / "analysis" / "beautify_inventory.json"
+    if inv_path.is_file():
+        try:
+            import json
+
+            inv = json.loads(inv_path.read_text(encoding="utf-8"))
+            count = inv.get("slide_count")
+            if isinstance(count, int) and count > 0:
+                return count
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+    return None
+
+
+def beautify_svg_final_count(project_dir: Path | None) -> int:
+    if not project_dir or not project_dir.is_dir():
+        return 0
+    svg_final = project_dir / "svg_final"
+    if not svg_final.is_dir():
+        return 0
+    return len(list(svg_final.glob("*.svg")))
+
+
+def beautify_output_ready(project_dir: Path | None) -> tuple[bool, str]:
+    """Return whether a beautify job produced a complete export."""
+    if not project_dir or not project_dir.is_dir():
+        return False, "project directory missing"
+
+    exports_dir = project_dir / "exports"
+    export_hits = sorted(exports_dir.glob("*.pptx"), key=lambda p: p.stat().st_mtime, reverse=True) if exports_dir.is_dir() else []
+    if not export_hits:
+        return False, "no exported pptx in exports/"
+
+    expected = beautify_expected_slide_count(project_dir)
+    actual = beautify_svg_final_count(project_dir)
+    if expected is not None and actual < expected:
+        return False, f"only completed {actual}/{expected} slides; export incomplete"
+
+    return True, ""
 
 
 def _project_snapshot(root: Path) -> tuple:
@@ -100,6 +202,45 @@ def _project_snapshot(root: Path) -> tuple:
         except OSError:
             pass
     return (len(files), total_size, max_mtime, tuple(sorted(names)))
+
+
+def _combined_snapshot(*roots: Path) -> tuple:
+    """Merge file fingerprints across multiple watch roots (e.g. template_create)."""
+    total_files = 0
+    total_size = 0
+    max_mtime = 0.0
+    all_names: list[str] = []
+    for root in roots:
+        snap = _project_snapshot(root)
+        total_files += snap[0]
+        total_size += snap[1]
+        max_mtime = max(max_mtime, snap[2])
+        prefix = str(root)
+        all_names.extend(f"{prefix}:{name}" for name in snap[3])
+    return (total_files, total_size, max_mtime, tuple(sorted(all_names)))
+
+
+def template_watch_roots(options: JobOptions | None, project_root: Path) -> list[Path]:
+    """Roots to monitor for template_create progress (project + output + staging)."""
+    if options is None or options.job_type != "template_create":
+        return [project_root]
+    from backend.db.session import SessionLocal  # noqa: PLC0415
+    from backend.models import Template  # noqa: PLC0415
+    from backend.paths import TEMPLATE_STAGING_DIR  # noqa: PLC0415
+
+    roots: list[Path] = [project_root]
+    if options.template_record_id:
+        with SessionLocal() as s:
+            row = s.get(Template, options.template_record_id)
+            if row and row.storage_path:
+                storage = Path(row.storage_path)
+                if storage not in roots:
+                    roots.append(storage)
+    if options.template_staging_id:
+        staging = TEMPLATE_STAGING_DIR / options.template_staging_id
+        if staging not in roots:
+            roots.append(staging)
+    return roots
 
 
 def build_initial_prompt(
@@ -140,8 +281,24 @@ def build_initial_prompt(
 
     opts: JobOptions | None = options
     is_beautify = opts is not None and opts.job_type == "beautify"
+    is_template_create = opts is not None and opts.job_type == "template_create"
 
-    if is_beautify:
+    if is_template_create:
+        prompt_body = prompt
+        if mount_path and host_prefix:
+            prompt_body = translate_paths_for_container(prompt, Path(host_prefix))
+        mp = mount_path or "/work"
+        parts = [
+            prompt_body,
+            "",
+            "重要约束：",
+            "1. 这是模板库资产制作任务，不是用户 PPT 生成。",
+            "2. 完成后在回复末尾单独一行写 TEMPLATE_CREATE_DONE。",
+            "3. 不要启动 confirm_ui/server.py。",
+            f"4. 容器内路径：用户数据在 {mp}/，分析工作区在 {mp}/template-staging/，"
+            f"全局模板输出在 {mp}/global-templates/，个人模板输出在 {mp}/templates/。",
+        ]
+    elif is_beautify:
         parts = [
             "请先 read_file 读取 skills/ppt-master/workflows/routing.md，确认走 beautify 路线。",
             "然后 read_file 读取 skills/ppt-master/workflows/beautify-pptx.md，并严格按该工作流执行。",
@@ -203,18 +360,28 @@ def build_initial_prompt(
 
     if opts is not None:
         if is_beautify and opts.template is not None:
-            container_path = resolve_container_template_path(opts.template.kind, opts.template.id)
+            owner_id = None
+            if opts.template.scope == "user" and host_prefix:
+                # host_prefix = data/users/<uid>
+                owner_id = Path(host_prefix).name
+            container_path = resolve_container_template_path(
+                opts.template.scope,
+                opts.template.kind,
+                opts.template.id,
+                user_id=owner_id,
+            )
             parts.append(format_beautify_options_for_prompt(opts, container_template_path=container_path))
             parts.append("")
-            parts.append(f"模板安装命令示例：")
+            parts.append("模板安装命令示例：")
             parts.append(f"  cp -r {container_path}/* <project_path>/templates/")
             parts.append("")
-        else:
+        elif not is_template_create:
             parts.append(format_options_for_prompt(opts))
             parts.append("")
 
-    parts.append("用户内容：")
-    parts.append(prompt)
+    if not is_template_create:
+        parts.append("用户内容：")
+        parts.append(prompt)
     return "\n".join(parts)
 
 

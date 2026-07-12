@@ -6,11 +6,12 @@ import { useAuthStore } from '../stores/authStore'
 import { confirmDialog } from '../stores/modalStore'
 import { PageShell } from '../components/ui/PageShell'
 import { Tabs } from '../components/ui/Tabs'
+import { AdminTemplateCategoriesPanel } from '../components/admin/AdminTemplateCategoriesPanel'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 import { StatusPill } from '../components/jobs/StatusPill'
 import { fmtDateTime } from '../lib/format'
 
-type Tab = 'overview' | 'users' | 'jobs' | 'job-settings' | 'app-settings'
+type Tab = 'overview' | 'users' | 'jobs' | 'job-settings' | 'app-settings' | 'templates'
 
 // ── 应用设置：模型配置 ───────────────────────────────────────────
 type ModelProvider = 'minimax' | 'deepseek'
@@ -534,6 +535,7 @@ export function AdminPage() {
     { key: 'users', label: '用户' },
     { key: 'jobs', label: '任务' },
     { key: 'job-settings', label: 'JOB设置' },
+    { key: 'templates', label: '模板分类' },
     { key: 'app-settings', label: '应用设置' },
   ]
 
@@ -840,6 +842,8 @@ export function AdminPage() {
           </button>
         </div>
       )}
+
+      {tab === 'templates' && <AdminTemplateCategoriesPanel />}
 
       {tab === 'app-settings' && settings && (
         <div className="max-w-3xl space-y-4">

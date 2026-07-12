@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, downloadUrl } from '../api/client'
 import type { RevisionsListResponse, SseEvent } from '../api/types'
 import { useJob, useDeleteJob, useRetryJob } from '../hooks/useJobs'
+import { useRetryTemplateTask } from '../hooks/useTemplateTasks'
 import { useJobEvents } from '../hooks/useJobEvents'
 import { StatusPill } from '../components/jobs/StatusPill'
 import { fmtCost, fmtDateTime, truncate } from '../lib/format'
@@ -31,6 +32,7 @@ export function JobDetailPage() {
   const { data: job, isLoading, error, refetch } = useJob(id)
   const deleteJob = useDeleteJob()
   const retryJob = useRetryJob()
+  const retryTemplateTask = useRetryTemplateTask()
   const [tab, setTab] = useState<Tab>('overview')
   const [timeline, setTimeline] = useState<SseEvent[]>([])
   const [stage, setStage] = useState<Record<string, unknown> | null>(null)
@@ -204,11 +206,37 @@ export function JobDetailPage() {
     { key: 'files', label: '产物' },
   ]
 
+  const isTemplateJob = job.options?.job_type === 'template_create'
+  const templateRecordId = job.options?.template_record_id ?? null
+  const backTo = isTemplateJob ? '/templates?tab=tasks' : '/'
+  const backLabel = isTemplateJob ? '← 返回制作任务' : '← 返回任务列表'
+  const canRetryTemplate =
+    isTemplateJob &&
+    !!templateRecordId &&
+    (job.status === 'failed' || job.status === 'cancelled' || isPausedStuck)
+  const isRetrying = retryJob.isPending || retryTemplateTask.isPending
+
+  const doRetry = async () => {
+    if (!id) return
+    try {
+      if (canRetryTemplate && templateRecordId) {
+        await retryTemplateTask.mutateAsync(templateRecordId)
+        notifySuccess('已重新加入制作队列')
+      } else {
+        await retryJob.mutateAsync(id)
+        notifySuccess('已重新排队')
+      }
+      await refetch()
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : '重试失败')
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
       <div className="mb-4">
-        <Link to="/" className="text-sm text-slate-500 hover:text-gemini-600">
-          ← 返回任务列表
+        <Link to={backTo} className="text-sm text-slate-500 hover:text-gemini-600">
+          {backLabel}
         </Link>
       </div>
 
@@ -285,20 +313,11 @@ export function JobDetailPage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={retryJob.isPending}
-              onClick={async () => {
-                if (!id) return
-                try {
-                  await retryJob.mutateAsync(id)
-                  notifySuccess('已重新排队')
-                  await refetch()
-                } catch (e) {
-                  notifyError(e instanceof Error ? e.message : '重试失败')
-                }
-              }}
+              disabled={isRetrying || (!canRetryTemplate && !id)}
+              onClick={doRetry}
               className="rounded-md bg-gemini-600 px-4 py-1.5 text-sm text-white hover:bg-gemini-700 disabled:opacity-50"
             >
-              {retryJob.isPending ? '提交中…' : '重试生成'}
+              {isRetrying ? '提交中…' : isTemplateJob ? '重试制作' : '重试生成'}
             </button>
             <button
               type="button"
@@ -322,7 +341,7 @@ export function JobDetailPage() {
                 try {
                   await deleteJob.mutateAsync(id)
                   notifySuccess('已删除')
-                  navigate('/')
+                  navigate(backTo)
                 } catch (e) {
                   notifyError(e instanceof Error ? e.message : '删除失败')
                 }
@@ -330,6 +349,27 @@ export function JobDetailPage() {
               className="rounded-md border border-slate-300 px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
             >
               删除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canRetryTemplate && !isPausedStuck && (job.status === 'failed' || job.status === 'cancelled') && (
+        <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-900/20">
+          <h3 className="text-sm font-medium text-rose-800 dark:text-rose-200">
+            模板制作失败
+          </h3>
+          {job.error_message && (
+            <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">{job.error_message}</p>
+          )}
+          <div className="mt-3">
+            <button
+              type="button"
+              disabled={isRetrying}
+              onClick={doRetry}
+              className="rounded-md bg-gemini-600 px-4 py-1.5 text-sm text-white hover:bg-gemini-700 disabled:opacity-50"
+            >
+              {isRetrying ? '提交中…' : '重试制作'}
             </button>
           </div>
         </div>
