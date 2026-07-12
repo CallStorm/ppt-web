@@ -4,13 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SlideForge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('ppt.theme');
-          if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-          }
+          var theme = localStorage.getItem('ppt.theme');
+          var legacy = localStorage.getItem('ppt.skin');
+          var raw = theme || legacy || 'modern';
+          var map = { default: 'modern', fresh: 'forest', warm: 'modern', minimal: 'modern', violet: 'modern', business: 'modern' };
+          var resolved = map[raw] || raw;
+          if (resolved !== 'modern' && resolved !== 'forest' && resolved !== 'guofeng') resolved = 'modern';
+          document.documentElement.dataset.theme = resolved;
         } catch (e) {}
       })();
     </script>

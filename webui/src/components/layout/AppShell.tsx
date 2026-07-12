@@ -1,68 +1,68 @@
-import { Link, Outlet, useNavigate } from 'react-router-dom'
+import { useLayoutEffect } from 'react'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { APP_NAME } from '../../lib/brand'
 import { useAuthStore } from '../../stores/authStore'
-import { useThemeStore } from '../../stores/themeStore'
+import { MascotToggle } from '../mascot/MascotToggle'
+import { cn } from '../../lib/cn'
+import { APP_MAIN_SCROLL_ID, resetMainScroll } from '../../lib/scrollMain'
+import { CreatePptDropdown } from './CreatePptDropdown'
+import { UserMenu } from './UserMenu'
+
+const navLinkClass = (active: boolean) =>
+  cn(
+    'rounded-[var(--radius-control)] px-3 py-1.5 font-medium transition-colors',
+    active
+      ? 'bg-primary-muted text-primary'
+      : 'text-muted-fg hover:bg-primary-muted/30 hover:text-foreground',
+  )
 
 export function AppShell() {
-  const me = useAuthStore((s) => s.me)
-  const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.isAdmin)
-  const theme = useThemeStore((s) => s.theme)
-  const toggleTheme = useThemeStore((s) => s.toggle)
-  const navigate = useNavigate()
+  const location = useLocation()
+  const isChatWorkspace = location.pathname.startsWith('/chat')
+  const path = location.pathname
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
+  useLayoutEffect(() => {
+    if (!isChatWorkspace) resetMainScroll()
+  }, [location.pathname, isChatWorkspace])
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-slate-200 bg-white/80 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
-        <Link to="/" className="mr-6 text-base font-semibold">
+    <div className="theme-page flex h-screen flex-col overflow-hidden">
+      <header className="z-30 flex h-14 shrink-0 items-center border-b border-border bg-surface-elevated/90 px-4 backdrop-blur">
+        <Link to="/" className="font-display shrink-0 text-base font-semibold text-foreground">
           {APP_NAME}
         </Link>
-        <nav className="flex items-center gap-1 text-sm">
-          <Link
-            to="/jobs/new"
-            className="rounded-md bg-gemini-600 px-3 py-1.5 font-medium text-white hover:bg-gemini-700"
-          >
-            创建
-          </Link>
+        <CreatePptDropdown pathname={path} className="ml-4" />
+        <Link
+          to="/templates"
+          className={cn(navLinkClass(path.startsWith('/templates')), 'ml-4 text-sm')}
+        >
+          模板库
+        </Link>
+        <div className="ml-auto flex items-center gap-2 text-sm">
           {isAdmin() && (
-            <Link
-              to="/admin"
-              className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              管理后台
+            <Link to="/admin" className={navLinkClass(path.startsWith('/admin'))}>
+              工作台
             </Link>
           )}
-        </nav>
-        <div className="ml-auto flex items-center gap-4 text-sm">
-          <span className="hidden text-slate-500 sm:inline dark:text-slate-400">{me?.email}</span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-gemini-50 px-2 py-0.5 text-xs font-medium text-gemini-700 dark:bg-gemini-900/30 dark:text-gemini-200">
-            <span aria-hidden>◆</span>
-            {me?.quota_credits ?? 0} credits
-          </span>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="rounded p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
-            aria-label="切换主题"
-          >
-            {theme === 'dark' ? '🌙' : '☀️'}
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="text-xs text-slate-500 hover:text-rose-600"
-          >
-            登出
-          </button>
+          <MascotToggle />
+          <UserMenu />
         </div>
       </header>
-      <main className="flex-1">
-        <Outlet />
+      <main
+        id={APP_MAIN_SCROLL_ID}
+        className={cn(
+          'min-h-0 flex-1',
+          isChatWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
+        )}
+      >
+        {isChatWorkspace ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </main>
     </div>
   )

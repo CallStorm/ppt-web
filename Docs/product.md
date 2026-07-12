@@ -25,7 +25,7 @@ ppt-web（本仓库）
 ├── backend/          ← Web API、任务调度、Docker 编排
 ├── webui/            ← React 前端
 ├── docker/           ← 每 job 一个临时容器
-└── ppt-master/       ← git submodule，生成引擎（skill + 脚本）
+└── ppt-master/       ← 上游 clone（build 时或 ensure 脚本），生成引擎（skill + 脚本）
 ```
 
 **关键认知**：ppt-master 不是一个独立程序，而是一份 **SKILL.md 工作流剧本** + Python 脚本集合。它必须由具备工具调用能力的 AI agent（Claude Code）读懂并按顺序执行。ppt-web 的本质是**让服务器扮演那个 AI IDE**，而不是「给 ppt-master 简单包个网页」。
@@ -248,6 +248,47 @@ ppt-web（本仓库）
 配置修改后**仅对新启动的任务/容器生效**。
 
 Admin API 完整文档：启动服务后访问 `/docs`，筛选 `admin` tag。
+
+---
+
+## 完成后编辑（Revisions）
+
+对 `status === 'done'` 的任务，可在 WebUI 卡片悬停时点「编辑」进入修改页（或访问 `/jobs/{id}/edit`）。在要改的页下面写意见、勾选确认后提交——后端会**新建一个 revision job**（`revision_of_job_id` 指向原任务），把原 deck 复制到 revision 的隔离目录，**扣 1 credit**，然后用 `claude --resume <原 session_id>` 把修改意见喂回去。
+
+![作品列表（已完成的 PPT 卡片）](../images/edit-01-dashboard.png)
+
+**编辑页**（`/jobs/{id}/edit`）：幻灯片缩略图网格，每张下面一个 textarea（限 1000 字符）。底部 sticky 底栏有「我已检查全部 N 张图」勾选 + 「提交修改」按钮（无意见 / 未勾选 / 提交中均 disabled），并显示「将扣 1 个积分」提醒。也支持**全局修改**（换色、换字体、自定义 deck 级指令）。
+
+![编辑页 — 缩略图 + 每页意见框](../images/edit-02-edit-page.png)
+
+**任务详情**（原任务）有「编辑修改」链接（与「下载」并列）；「下载 PPTX」默认指向**最新**已完成的 revision，文件名带版本号后缀；底部「版本历史」区列出整条链，每条带「原版/最新」徽标、状态、提交时间、评论摘要，并可单独下载。
+
+![任务详情 — 版本历史区](../images/revisions-03-job-detail.png)
+
+**最新 revision 的详情页**同样展示版本历史；Agent 的 `last_agent_text` 可直接查看，便于确认改对了哪一页。
+
+![最新版详情 — 版本历史 + Agent 输出](../images/revisions-04-latest-revision.png)
+
+### 关键设计
+
+- **新 job 独立**：revision 走自己的 status / events / cancel / pptx，UI 上像看一个全新任务一样看进度
+- **历史版本不限制**：每次修改留一个版本；详情页「版本历史」列出全部，可下载任意历史 pptx
+- **下载默认最新**：前端「版本历史」逻辑将下载指向最新 `is_latest && status === 'done'` 的 revision
+- **session 不可用时降级**：若服务重启导致原 `session_id` 丢失，prompt 切到「无上下文」模板，提示 agent 读 `design_spec.md` + `svg_output/` 自助修改
+- **单轮**：本轮只跑一次；想再改就再次点「编辑」重新提交
+
+截图脚本：`scripts/screenshot_revisions.py`（Playwright，需已有带 revision 链的 done job）。
+
+### API
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| `GET` | `/api/jobs/{id}/edit-targets` | 可编辑性 + 幻灯片缩略图（含 `current_note`） |
+| `POST` | `/api/jobs/{id}/revisions` | 提交逐页 `{mode:"per_page", items:[{slide_index, comment}]}` 或全局 `{mode:"global", global_revision:{...}}`；返回 `{revision_job_id, status}` |
+| `GET` | `/api/jobs/{id}/revisions` | 本任务 + 后续 revisions 链（含 `is_latest`） |
+
+后端实现：`backend/runtime/revisions.py`、`backend/api/routes/jobs.py`、`backend/tests/test_revisions.py`。
+
 ---
 
 ## 相关文档

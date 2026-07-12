@@ -170,6 +170,9 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                     u = s.get(User, j.user_id)
                     if u:
                         u.quota_credits += 1
+                from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+                sync_template_on_job_terminal(s, j)
                 s.commit()
         _enqueue_event(job_id, "status", {"status": "failed"})
         _enqueue_event(job_id, "error", {"message": docker_err})
@@ -230,6 +233,14 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                 s.commit()
         if final.get("pptx_path"):
             _enqueue_event(job_id, "pptx", {"url": f"/api/jobs/{job_id}/pptx"})
+        if job_options and job_options.job_type == "template_create":
+            from backend.app.template_service import finalize_template_job  # noqa: PLC0415
+
+            finalize_template_job(
+                job_id,
+                success=final["status"] == "done",
+                error_message=final.get("error_message"),
+            )
     except Exception as e:
         logging.exception("run_job failed")
         with SessionLocal() as s:
@@ -239,6 +250,16 @@ async def run_job(job_id: str, prompt: str, project_name: str, upload_paths: lis
                 log.warning("job %s runner exception raw: %s", job_id, e)
                 j.error_message = humanize_error(f"runner exception: {e}")
                 s.commit()
+                if j.options_json:
+                    opts = parse_job_options(j.options_json)
+                    if (
+                        opts
+                        and opts.job_type == "template_create"
+                        and opts.template_record_id
+                    ):
+                        from backend.app.template_service import mark_template_failed  # noqa: PLC0415
+
+                        mark_template_failed(s, opts.template_record_id, str(e))
             # runner 异常 refund 1 credit（pre-decrement 的对冲）。
             # 正常 run_sync 返回的 status="failed"（claude 跑完但没出 pptx）不 refund。
             if j and j.user_id:
@@ -280,6 +301,7 @@ async def resume_job(job_id: str, confirm: str) -> None:
         session_id = j.session_id
         project_name = j.project_name
         project_root = project_root_for(j.user_id, job_id)
+        job_options = parse_job_options(j.options_json) if j.options_json else None
         j.status = "running"
         s.commit()
 
@@ -314,6 +336,7 @@ async def resume_job(job_id: str, confirm: str) -> None:
             cancel_event=state._active_cancel_events[job_id],
             proc_holder=state._active_proc_holders[job_id],
             job_id=job_id,
+            options=job_options,
         )
         with SessionLocal() as s:
             j = s.get(DbJob, job_id)

@@ -29,9 +29,10 @@ import {
   type JobVisualStyle,
 } from '../lib/jobOptions'
 import { pickHint } from '../lib/aiHints'
+import { scrollMainToElement, resetMainScroll } from '../lib/scrollMain'
 
-const SELECT_CLASS =
-  'w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800'
+import { panelClassName } from '../components/ui/Card'
+import { selectClassName } from '../components/ui/Select'
 
 function OptionSelect<T extends string>({
   label,
@@ -52,7 +53,7 @@ function OptionSelect<T extends string>({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className={SELECT_CLASS}
+        className={selectClassName}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -66,8 +67,7 @@ function OptionSelect<T extends string>({
 
 type CreateMode = 'topic' | 'document'
 
-const PANEL_CLASS =
-  'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/40'
+const PANEL_CLASS = panelClassName
 
 const SECTION_HEADER =
   'flex w-full items-center justify-between text-left text-sm font-medium text-slate-700 dark:text-slate-200'
@@ -94,6 +94,7 @@ export function NewJobPage() {
   const [openTone, setOpenTone] = useState(false)
   const [openImagery, setOpenImagery] = useState(false)
   const [openAdvanced, setOpenAdvanced] = useState(false)
+  const [planReadyHint, setPlanReadyHint] = useState(false)
 
   const prerequisitesOk = useMemo(
     () =>
@@ -114,17 +115,14 @@ export function NewJobPage() {
   }
 
   const scrollToSection = (id: string) => {
-    requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    scrollMainToElement(id, { align: 'center' })
   }
 
   const scrollToConfirm = () => scrollToSection(CONFIRM_SECTION_ID)
 
   const onAutoFillSuccess = () => {
-    setOpenTone(true)
-    setOpenImagery(true)
     setPlanConfirmed(false)
+    setPlanReadyHint(true)
     scrollToConfirm()
   }
 
@@ -159,6 +157,7 @@ export function NewJobPage() {
       notifySuccess('已开始生成，请稍候…')
       invalidateDefaultModelCache()
       invalidateJobLists(qc)
+      resetMainScroll()
       navigate(`/jobs/${job.id}`)
     } catch (e) {
       notifyError('创建失败: ' + (e instanceof Error ? e.message : String(e)))
@@ -279,15 +278,27 @@ export function NewJobPage() {
   const hint = pickHint(coreTopic)
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">创建 PPT</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h1 className="font-display text-xl font-semibold text-foreground">创建 PPT</h1>
+          <p className="mt-1 text-sm text-muted-fg">
             先确认大纲与风格，再开始生成；提交后自动完成，中途无法修改设置。
           </p>
+          {planReadyHint && (
+            <p className="mt-2 rounded-md border border-primary/20 bg-primary-muted/30 px-3 py-2 text-sm text-foreground">
+              方案预览已生成，请在下方的「④ 确认方案」核对大纲与风格。
+              <button
+                type="button"
+                onClick={scrollToConfirm}
+                className="ml-2 text-primary hover:underline"
+              >
+                查看确认方案
+              </button>
+            </p>
+          )}
         </div>
-        <Link to="/" className="text-sm text-slate-500 hover:text-gemini-600">
+        <Link to="/" className="text-sm text-muted-fg hover:text-primary">
           取消
         </Link>
       </div>

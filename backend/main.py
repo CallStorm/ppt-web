@@ -19,9 +19,12 @@ from backend.db.migrations import (
     migrate_v4_to_v5,
     migrate_v5_to_v6,
     migrate_v6_to_v7,
+    migrate_v7_to_v8,
+    migrate_v8_to_v9,
 )
+from backend.app.template_seed import seed_template_catalog
 from backend.db.session import init_db
-from backend.paths import DATA_DIR
+from backend.paths import DATA_DIR, GLOBAL_TEMPLATES_DIR, TEMPLATE_STAGING_DIR
 from backend.runner.docker import check_docker_runner_ready
 from backend.runtime import (
     cleanup_stuck_jobs,
@@ -50,9 +53,16 @@ async def lifespan(app: FastAPI):
         log.warning("backend migrate_v5_to_v6 done; added jobs.options_json")
     if migrate_v6_to_v7():
         log.warning("backend migrate_v6_to_v7 done; added jobs.revision_of_job_id")
+    if migrate_v7_to_v8():
+        log.warning("backend migrate_v7_to_v8 done; added conversations + messages")
+    if migrate_v8_to_v9():
+        log.warning("backend migrate_v8_to_v9 done; added template_categories + templates")
     init_db()
     seed_default_admin()
+    seed_template_catalog()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    GLOBAL_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATE_STAGING_DIR.mkdir(parents=True, exist_ok=True)
     init_runtime()
     n = cleanup_stuck_jobs()
     if n:

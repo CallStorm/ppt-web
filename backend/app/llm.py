@@ -199,6 +199,112 @@ def chat_json(
     return parsed, info
 
 
+def chat_turn(
+    messages: list[dict[str, str]],
+    system: str,
+    *,
+    max_tokens: int = 2048,
+    temperature: float = 0.4,
+) -> tuple[str, dict]:
+    """多轮对话：messages 为 [{role, content}, ...]，返回 (assistant_text, model_info)。"""
+    model, api_key = get_default_model()
+    protocol = (model.get("protocol") or "").lower()
+    if protocol != "anthropic":
+        raise LlmError(
+            f"暂不支持的协议: {protocol}（当前仅支持 anthropic 兼容）",
+            code="unsupported_protocol",
+        )
+
+    url = _build_messages_url(model["base_url"])
+    anthropic_messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+    if not anthropic_messages:
+        raise LlmError("messages 为空", code="parse_error")
+
+    payload = {
+        "model": model["model"],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": anthropic_messages,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "content-type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
+            data = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        log.warning("LLM upstream HTTP %s: %s", e.code, err_body)
+        if e.code in (401, 403):
+            raise LlmError(f"鉴权失败（{e.code}）", code="auth_error", upstream_status=e.code) from e
+        if 400 <= e.code < 500:
+            raise LlmError(
+                f"上游 4xx（{e.code}）：{err_body}",
+                code="upstream_4xx",
+                upstream_status=e.code,
+            ) from e
+        raise LlmError(
+            f"上游 5xx（{e.code}）：{err_body}",
+            code="upstream_5xx",
+            upstream_status=e.code,
+        ) from e
+    except urllib.error.URLError as e:
+        raise LlmError(f"网络错误：{e.reason}", code="network_error") from e
+    except TimeoutError as e:
+        raise LlmError(f"请求超时（>{_HTTP_TIMEOUT_S}s）", code="network_error") from e
+
+    try:
+        outer = json.loads(data)
+    except json.JSONDecodeError as e:
+        raise LlmError(f"上游返回非 JSON：{data[:200]!r}", code="parse_error") from e
+
+    content = outer.get("content") or []
+    text_parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    text = "".join(text_parts).strip()
+    if not text:
+        raise LlmError(f"上游返回无 text 内容：{data[:200]!r}", code="parse_error")
+
+    info = {
+        "id": model["id"],
+        "name": model.get("name") or model["id"],
+        "provider": model.get("provider") or "",
+        "model": model.get("model") or "",
+    }
+    return text, info
+
+
+def chat_turn_json(
+    messages: list[dict[str, str]],
+    system: str,
+    *,
+    max_tokens: int = 2048,
+    temperature: float = 0.4,
+) -> tuple[dict, dict]:
+    """多轮对话，解析 assistant 输出为 JSON。"""
+    text, info = chat_turn(messages, system, max_tokens=max_tokens, temperature=temperature)
+    parsed = _extract_json(text)
+    return parsed, info
+
+
 # ── 三个 AI 端点用的 system prompts ─────────────────────────
 
 SYSTEM_OPTIMIZE_PROMPT = """你是 PPT 创作助手。根据用户提供的主题，输出一段扩展后的、适合交给 PPT 生成 agent 的中文描述。

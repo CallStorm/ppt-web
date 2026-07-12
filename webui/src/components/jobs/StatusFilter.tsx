@@ -36,7 +36,7 @@ export function StatusFilter({
             onClick={() => onChange(o.key)}
             className={`rounded-full px-3 py-1 text-xs transition-colors ${
               value === o.key
-                ? 'bg-gemini-600 text-white'
+                ? 'bg-primary text-primary-fg'
                 : highlightIdle
                   ? isFailedTab
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'

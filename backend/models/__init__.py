@@ -131,3 +131,100 @@ class AdminActionLog(Base):
     target_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class Conversation(Base):
+    """对话式 PPT 创作会话。
+
+    phase 门控：intake → requirements → outline → style → generating → done
+    draft_json 存当前规划快照；job_id 在确认生成后关联。
+    """
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="新对话")
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="create")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="planning")
+    phase: Mapped[str] = mapped_column(String(16), nullable=False, default="intake")
+    draft_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_conversations_user_updated", "user_id", "updated_at"),
+    )
+
+
+class TemplateCategory(Base):
+    """模板 UI 分类（系统内置 / 管理员创建 / 我的模板 标签）。"""
+    __tablename__ = "template_categories"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default="admin")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class Template(Base):
+    """模板元数据索引；文件包在磁盘（system / global / user scope）。"""
+    __tablename__ = "templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    category_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("template_categories.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    primary_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    canvas_format: Mapped[str] = mapped_column(String(32), nullable=False, default="ppt169")
+    page_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    page_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    brief_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_templates_scope_kind_slug", "scope", "kind", "slug"),
+        Index("ix_templates_owner_status", "owner_user_id", "status"),
+    )
+
+
+class Message(Base):
+    """会话内一条消息（user / assistant / system）。"""
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_messages_conv_created", "conversation_id", "created_at"),
+    )
