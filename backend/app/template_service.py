@@ -27,6 +27,7 @@ from backend.db.session import SessionLocal
 from backend.models import Job, Template, TemplateCategory, User
 from backend.paths import (
     TEMPLATE_STAGING_DIR,
+    _safe_token,
     global_templates_dir,
     project_root_for,
     user_templates_dir,
@@ -145,6 +146,7 @@ def parse_manifest_analysis(manifest: dict[str, Any], native: dict[str, Any]) ->
         canvas_format = "ppt169"
 
     source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    # Caller may override with the original upload filename (see analyze_pptx).
     title_guess = str(source.get("name") or "template").replace(".pptx", "").replace("_", " ")
 
     return {
@@ -363,7 +365,93 @@ def _assert_template_access(
     resolve_template_path(scope, kind, template_id)
 
 
-def analyze_pptx(staging_id: str, pptx_path: Path) -> dict[str, Any]:
+def display_name_from_filename(stem: str) -> str:
+    """Human-friendly display name from the uploaded file stem."""
+    name = stem.replace("_", " ").strip()
+    return name or "template"
+
+
+def slug_base_from_filename(stem: str) -> str:
+    """ASCII slug seed from the uploaded file stem (not deduplicated)."""
+    raw = _safe_token(stem, max_len=48).lower().replace(".", "_").strip("_")
+    if not raw:
+        raw = "template"
+    if raw[0].isdigit():
+        raw = f"tpl_{raw}"
+    if not SLUG_RE.match(raw):
+        raw = f"tpl_{uuid.uuid4().hex[:8]}"
+    return raw[:64]
+
+
+def slug_is_taken(
+    s: Session,
+    *,
+    slug: str,
+    kind: TemplateKind,
+    scope: TemplateScope,
+    owner_id: str | None,
+) -> bool:
+    """Whether slug conflicts with DB rows, on-disk dirs, or system templates."""
+    if scope == "user":
+        if not owner_id:
+            return True
+        row = (
+            s.query(Template)
+            .filter(
+                Template.scope == "user",
+                Template.kind == kind,
+                Template.slug == slug,
+                Template.owner_user_id == owner_id,
+            )
+            .first()
+        )
+        if row or (user_templates_dir(owner_id) / slug).exists():
+            return True
+    elif scope == "global":
+        row = (
+            s.query(Template)
+            .filter(Template.scope == "global", Template.kind == kind, Template.slug == slug)
+            .first()
+        )
+        if row or (global_templates_dir() / slug).exists():
+            return True
+
+    for sys_kind, template_dir in list_system_template_dirs():
+        if sys_kind == kind and template_dir.name == slug:
+            return True
+    return False
+
+
+def suggest_unique_slug(
+    s: Session,
+    *,
+    base: str,
+    kind: TemplateKind,
+    scope: TemplateScope,
+    owner_id: str | None,
+) -> tuple[str, bool]:
+    """Return the first available slug, suffixing with _2, _3, … when needed."""
+    candidate = base.strip()
+    if not SLUG_RE.match(candidate):
+        raise HTTPException(422, "invalid slug")
+    if not slug_is_taken(s, slug=candidate, kind=kind, scope=scope, owner_id=owner_id):
+        return candidate, False
+    for n in range(2, 100):
+        suffixed = f"{candidate}_{n}"
+        if not SLUG_RE.match(suffixed):
+            continue
+        if not slug_is_taken(s, slug=suffixed, kind=kind, scope=scope, owner_id=owner_id):
+            return suffixed, True
+    fallback = f"{candidate}_{uuid.uuid4().hex[:6]}"
+    return fallback, True
+
+
+def analyze_pptx(
+    staging_id: str,
+    pptx_path: Path,
+    *,
+    display_name_hint: str | None = None,
+) -> dict[str, Any]:
     if not PPTX_IMPORT.is_file():
         raise HTTPException(500, "pptx_template_import.py not found")
     out_dir = TEMPLATE_STAGING_DIR / staging_id
@@ -405,10 +493,10 @@ def analyze_pptx(staging_id: str, pptx_path: Path) -> dict[str, Any]:
             cover_preview = flats[0].name
     analysis["cover_preview"] = cover_preview
 
-    title_guess = analysis.pop("title_guess", "template")
-    slug_guess = re.sub(r"[^a-z0-9]+", "_", title_guess.lower()).strip("_")[:48] or "my_template"
-    if not SLUG_RE.match(slug_guess):
-        slug_guess = f"tpl_{uuid.uuid4().hex[:8]}"
+    analysis.pop("title_guess", None)
+    stem = (display_name_hint or pptx_path.stem).strip()
+    title_guess = display_name_from_filename(stem)
+    slug_base = slug_base_from_filename(stem)
 
     return {
         "staging_id": staging_id,
@@ -417,7 +505,8 @@ def analyze_pptx(staging_id: str, pptx_path: Path) -> dict[str, Any]:
         "analysis": {
             **analysis,
             "title_guess": title_guess,
-            "slug_guess": slug_guess,
+            "slug_base": slug_base,
+            "slug_guess": slug_base,
         },
     }
 

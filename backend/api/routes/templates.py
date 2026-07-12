@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.app.template_service import (
+    SLUG_RE,
     analyze_pptx,
     build_template_create_prompt,
     create_template_record,
@@ -21,6 +23,7 @@ from backend.app.template_service import (
     list_template_tasks,
     publish_template,
     retry_template_task,
+    suggest_unique_slug,
     template_row_to_entry,
 )
 from backend.app.templates import (
@@ -77,6 +80,12 @@ class TemplateBriefBody(BaseModel):
 class TemplatePatchBody(BaseModel):
     display_name: str | None = None
     category_id: str | None = None
+
+
+class SuggestSlugBody(BaseModel):
+    slug: str = Field(min_length=1, max_length=64)
+    kind: TemplateKindParam = "deck"
+    scope: Literal["user", "global"] = "user"
 
 
 @router.get("/categories")
@@ -177,7 +186,30 @@ async def analyze_template_pptx(
                 dest.unlink(missing_ok=True)
                 raise HTTPException(413, "file too large")
             out.write(chunk)
-    return analyze_pptx(staging_id, dest)
+    original_stem = Path(file.filename).stem
+    return analyze_pptx(staging_id, dest, display_name_hint=original_stem)
+
+
+@router.post("/suggest-slug")
+def suggest_template_slug(body: SuggestSlugBody, user: CurrentUser) -> dict:
+    slug = body.slug.strip().lower()
+    if not SLUG_RE.match(slug):
+        raise HTTPException(422, "invalid slug")
+    if body.scope == "global" and user.role != "admin":
+        raise HTTPException(403, "admin required")
+    with SessionLocal() as s:
+        u = s.get(User, user.id)
+        if not u:
+            raise HTTPException(401, "user not found")
+        owner_id = u.id if body.scope == "user" else None
+        unique, deduplicated = suggest_unique_slug(
+            s,
+            base=slug,
+            kind=body.kind,  # type: ignore[arg-type]
+            scope=body.scope,  # type: ignore[arg-type]
+            owner_id=owner_id,
+        )
+    return {"slug": unique, "base": slug, "deduplicated": deduplicated}
 
 
 @router.get("/records/{db_id}/status")

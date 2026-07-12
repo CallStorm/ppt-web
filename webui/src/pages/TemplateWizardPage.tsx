@@ -11,6 +11,7 @@ import {
   normalizeSlugInput,
   validateBriefFields,
 } from '../lib/templateBriefValidation'
+import { suggestTemplateSlug } from '../lib/templateTasks'
 import { panelClassName } from '../components/ui/Card'
 
 type AnalysisResult = {
@@ -29,6 +30,7 @@ type AnalysisResult = {
     primary_color: string | null
     cover_preview: string | null
     title_guess: string
+    slug_base: string
     slug_guess: string
     native_structure_mode: string
     theme_mode: string
@@ -113,6 +115,8 @@ export function TemplateWizardPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [dbId, setDbId] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<BriefFieldErrors>({})
+  const [slugBase, setSlugBase] = useState<string | null>(null)
+  const [slugDedupHint, setSlugDedupHint] = useState<string | null>(null)
 
   const [brief, setBrief] = useState<BriefForm | null>(null)
 
@@ -150,6 +154,31 @@ export function TemplateWizardPage() {
     }
   }, [brief])
 
+  const applySlugSuggestion = async (b: BriefForm, base: string) => {
+    try {
+      const scope = b.scope === 'global' ? 'global' : 'user'
+      const res = await suggestTemplateSlug({ slug: base, kind: b.kind, scope })
+      setBrief({ ...b, slug: res.slug })
+      setSlugDedupHint(
+        res.deduplicated ? `检测到重名，已建议为「${res.slug}」` : null,
+      )
+      if (Object.keys(fieldErrors).length > 0) {
+        setFieldErrors(runBriefValidation({ ...b, slug: res.slug }))
+      }
+    } catch (e) {
+      notifyError('Slug 建议失败: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  const goToConfigStep = async () => {
+    if (!brief || !slugBase) {
+      setStep(2)
+      return
+    }
+    setStep(2)
+    await applySlugSuggestion(brief, slugBase)
+  }
+
   const uploadPptx = async (file: File) => {
     setUploading(true)
     try {
@@ -158,9 +187,12 @@ export function TemplateWizardPage() {
       const res = await api<AnalysisResult>('POST', '/api/templates/analyze', fd)
       setAnalysis(res)
       const a = res.analysis
+      const baseSlug = a.slug_base || a.slug_guess
+      setSlugBase(baseSlug)
+      setSlugDedupHint(null)
       setBrief({
         staging_id: res.staging_id,
-        slug: a.slug_guess,
+        slug: baseSlug,
         display_name: a.title_guess,
         kind: 'deck',
         canvas_format: a.canvas_format,
@@ -251,6 +283,9 @@ export function TemplateWizardPage() {
     if (Object.keys(fieldErrors).length > 0) {
       setFieldErrors(runBriefValidation(next))
     }
+    if (slugBase && (patch.kind !== undefined || patch.scope !== undefined)) {
+      void applySlugSuggestion(next, slugBase)
+    }
   }
 
   return (
@@ -330,7 +365,7 @@ export function TemplateWizardPage() {
             </ul>
             <StepNav
               onPrev={() => setStep(0)}
-              onNext={() => setStep(2)}
+              onNext={() => void goToConfigStep()}
               nextLabel="下一步：配置参数"
             />
           </div>
@@ -359,6 +394,9 @@ export function TemplateWizardPage() {
                 onChange={(e) => updateBrief({ slug: normalizeSlugInput(e.target.value) })}
               />
               <FieldError message={fieldErrors.slug} />
+              {slugDedupHint && (
+                <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{slugDedupHint}</p>
+              )}
             </label>
             <label className="block">
               类型

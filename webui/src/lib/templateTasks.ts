@@ -1,3 +1,4 @@
+import { api } from '../api/client'
 import type { TemplateCatalogEntry } from './jobOptions'
 
 export interface TemplateTask extends TemplateCatalogEntry {
@@ -35,4 +36,18 @@ export function formatTaskUpdatedAt(iso: string | null | undefined): string {
   } catch {
     return iso
   }
+}
+
+export type SuggestSlugResponse = {
+  slug: string
+  base: string
+  deduplicated: boolean
+}
+
+export async function suggestTemplateSlug(input: {
+  slug: string
+  kind: 'deck' | 'layout'
+  scope: 'user' | 'global'
+}): Promise<SuggestSlugResponse> {
+  return api<SuggestSlugResponse>('POST', '/api/templates/suggest-slug', input)
 }

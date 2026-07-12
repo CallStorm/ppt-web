@@ -24,10 +24,14 @@ from backend.app.templates import (
 )
 from backend.app.template_service import (
     delete_template,
+    display_name_from_filename,
     finalize_template_job,
     list_template_tasks,
     parse_manifest_analysis,
     retry_template_task,
+    slug_base_from_filename,
+    slug_is_taken,
+    suggest_unique_slug,
     sync_template_on_job_terminal,
     template_output_ready,
     validate_template_brief,
@@ -88,6 +92,90 @@ class ManifestAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["page_type_candidates"], ["cover", "content"])
         self.assertEqual(analysis["native_structure_mode"], "preserve")
         self.assertEqual(analysis["title_guess"], "demo")
+
+
+class FilenameSlugTests(unittest.TestCase):
+    def test_display_name_from_filename(self) -> None:
+        self.assertEqual(display_name_from_filename("AI语音知识库"), "AI语音知识库")
+        self.assertEqual(display_name_from_filename("My_Brand_Deck"), "My Brand Deck")
+
+    def test_slug_base_from_english_filename(self) -> None:
+        self.assertEqual(slug_base_from_filename("My_Brand_Deck"), "my_brand_deck")
+
+    def test_slug_base_not_reference_when_stem_differs(self) -> None:
+        self.assertEqual(slug_base_from_filename("AI_Voice_KB"), "ai_voice_kb")
+        self.assertNotEqual(slug_base_from_filename("AI_Voice_KB"), "reference")
+
+
+class SuggestUniqueSlugTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(cls.engine)
+        cls.Session = sessionmaker(bind=cls.engine)
+
+    def setUp(self):
+        self.session = self.Session()
+        for table in reversed(Base.metadata.sorted_tables):
+            self.session.execute(table.delete())
+        self.session.commit()
+        self.user_id = str(uuid.uuid4())
+        self.session.add(
+            User(id=self.user_id, email="slug@example.com", password_hash="x", quota_credits=5)
+        )
+        self.session.add(TemplateCategory(id="my_templates", name="我的模板", scope="system"))
+        self.session.commit()
+
+    def tearDown(self):
+        self.session.close()
+
+    def test_returns_base_when_free(self) -> None:
+        slug, deduped = suggest_unique_slug(
+            self.session, base="brand_deck", kind="deck", scope="user", owner_id=self.user_id,
+        )
+        self.assertEqual(slug, "brand_deck")
+        self.assertFalse(deduped)
+
+    def test_suffixes_when_db_row_exists(self) -> None:
+        self.session.add(
+            Template(
+                id=str(uuid.uuid4()),
+                slug="brand_deck",
+                display_name="Brand",
+                kind="deck",
+                scope="user",
+                owner_user_id=self.user_id,
+                category_id="my_templates",
+                status="ready",
+            )
+        )
+        self.session.commit()
+        slug, deduped = suggest_unique_slug(
+            self.session, base="brand_deck", kind="deck", scope="user", owner_id=self.user_id,
+        )
+        self.assertEqual(slug, "brand_deck_2")
+        self.assertTrue(deduped)
+
+    def test_slug_is_taken_for_existing_row(self) -> None:
+        self.session.add(
+            Template(
+                id=str(uuid.uuid4()),
+                slug="taken",
+                display_name="Taken",
+                kind="deck",
+                scope="user",
+                owner_user_id=self.user_id,
+                category_id="my_templates",
+                status="generating",
+            )
+        )
+        self.session.commit()
+        self.assertTrue(
+            slug_is_taken(
+                self.session, slug="taken", kind="deck", scope="user", owner_id=self.user_id,
+            )
+        )
+
 
 class BriefValidationTests(unittest.TestCase):
     def test_valid_brief(self) -> None:
