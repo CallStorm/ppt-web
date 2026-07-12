@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backend.api.routes.jobs import _apply_job_list_filters  # noqa: E402
+from backend.api.routes.jobs import _apply_job_list_filters, _exclude_template_create_jobs  # noqa: E402
 from backend.models import Base, Job, User  # noqa: E402
 
 
@@ -68,6 +68,14 @@ def _seed(session) -> dict[str, str]:
             project_name="Zeta Cancelled",
             status="cancelled",
         ),
+        "template_create": Job(
+            id=str(uuid.uuid4()),
+            user_id=user.id,
+            prompt="template prompt",
+            project_name="Tpl Create",
+            status="failed",
+            options_json='{"job_type": "template_create", "template_record_id": "x"}',
+        ),
     }
     session.add_all(jobs.values())
     session.commit()
@@ -103,7 +111,13 @@ class TestJobListFilters(unittest.TestCase):
         return [row.project_name for row in rows]
 
     def test_no_filter_returns_all(self):
-        self.assertEqual(len(self._names(None, None)), 6)
+        self.assertEqual(len(self._names(None, None)), 7)
+
+    def test_exclude_template_create_from_portfolio(self):
+        query = _exclude_template_create_jobs(self.base_query)
+        names = [row.project_name for row in query.order_by(Job.project_name).all()]
+        self.assertNotIn("Tpl Create", names)
+        self.assertEqual(len(names), 6)
 
     def test_running_includes_queued(self):
         self.assertEqual(self._statuses("running"), {"queued", "running"})

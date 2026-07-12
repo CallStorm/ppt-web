@@ -24,17 +24,30 @@ export type JobImageStrategy = 'ai' | 'web' | 'provided' | 'placeholder' | 'none
 export type JobIconStrategy = 'emoji' | 'library' | 'ai' | 'custom'
 export type JobFormulaPolicy = 'mixed' | 'render-all' | 'text-only'
 
-export type JobType = 'generate' | 'beautify'
+export type JobType = 'generate' | 'beautify' | 'template_create'
 export type TemplateKind = 'deck' | 'layout'
 export type TemplateUsage = 'adaptive' | 'strict'
 
+export type TemplateScope = 'system' | 'global' | 'user'
+
 export interface TemplateRef {
-  scope: 'global'
+  scope: TemplateScope
   kind: TemplateKind
   id: string
 }
 
+export interface TemplateCategory {
+  id: string
+  name: string
+  scope: string
+  sort_order: number
+}
+
 export interface TemplateCatalogEntry extends TemplateRef {
+  db_id?: string
+  slug?: string
+  display_name?: string
+  category_id?: string
   summary: string
   canvas_format: string
   page_count: number
@@ -42,6 +55,7 @@ export interface TemplateCatalogEntry extends TemplateRef {
   primary_color: string | null
   cover_svg: string | null
   preview_slides: string[]
+  status?: string
 }
 
 export type JobVisualStyle =
@@ -102,6 +116,10 @@ export interface JobOptions {
   formula_policy: JobFormulaPolicy
   include_speaker_notes: boolean
   split_mode: boolean
+
+  // template_create
+  template_record_id?: string | null
+  template_staging_id?: string | null
 }
 
 export interface OptionItem<T extends string = string> {

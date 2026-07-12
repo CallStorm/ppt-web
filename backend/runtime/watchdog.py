@@ -77,6 +77,9 @@ def _sweep_stale_jobs() -> int:
                     u.quota_credits += 1
                     log.info("watchdog: refund 1 credit to user %s (job %s)",
                              j.user_id, j.id)
+            from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+            sync_template_on_job_terminal(s, j)
         if stale:
             s.commit()
 

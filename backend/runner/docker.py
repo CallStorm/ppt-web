@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from backend.config import build_claude_env, get_runtime_config
+from backend.paths import GLOBAL_TEMPLATES_DIR, TEMPLATE_STAGING_DIR
 from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runner.docker")
@@ -145,6 +146,11 @@ def _build_docker_run_cmd(
         "-e", f"PROMPT={prompt_text}",
         "-e", f"JOB_ID={job_id or ''}",
     ]
+    global_tpl = GLOBAL_TEMPLATES_DIR
+    if global_tpl.is_dir():
+        cmd.extend(["-v", f"{global_tpl.resolve()}:{mount_path}/global-templates"])
+    TEMPLATE_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+    cmd.extend(["-v", f"{TEMPLATE_STAGING_DIR.resolve()}:{mount_path}/template-staging"])
     if extra_args:
         cmd.extend(["-e", f"CLAUDE_EXTRA_ARGS={' '.join(extra_args)}"])
 

@@ -1,14 +1,12 @@
 import { useLayoutEffect } from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { APP_NAME } from '../../lib/brand'
 import { useAuthStore } from '../../stores/authStore'
-import { Badge } from '../ui/Badge'
-import { AppearancePicker } from '../ui/AppearancePicker'
 import { MascotToggle } from '../mascot/MascotToggle'
-import { HeaderIconButton } from '../ui/HeaderIconButton'
-import { IconLogOut } from '../ui/icons'
 import { cn } from '../../lib/cn'
 import { APP_MAIN_SCROLL_ID, resetMainScroll } from '../../lib/scrollMain'
+import { CreatePptDropdown } from './CreatePptDropdown'
+import { UserMenu } from './UserMenu'
 
 const navLinkClass = (active: boolean) =>
   cn(
@@ -19,10 +17,7 @@ const navLinkClass = (active: boolean) =>
   )
 
 export function AppShell() {
-  const me = useAuthStore((s) => s.me)
-  const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.isAdmin)
-  const navigate = useNavigate()
   const location = useLocation()
   const isChatWorkspace = location.pathname.startsWith('/chat')
   const path = location.pathname
@@ -31,56 +26,27 @@ export function AppShell() {
     if (!isChatWorkspace) resetMainScroll()
   }, [location.pathname, isChatWorkspace])
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
-
   return (
     <div className="theme-page flex h-screen flex-col overflow-hidden">
       <header className="z-30 flex h-14 shrink-0 items-center border-b border-border bg-surface-elevated/90 px-4 backdrop-blur">
-        <Link to="/" className="font-display mr-6 text-base font-semibold text-foreground">
+        <Link to="/" className="font-display shrink-0 text-base font-semibold text-foreground">
           {APP_NAME}
         </Link>
-        <nav className="flex items-center gap-1 text-sm">
-          <Link to="/chat" className={cn(navLinkClass(path.startsWith('/chat')), 'border border-accent/20')}>
-            对话创作
-          </Link>
-          <Link
-            to="/jobs/beautify"
-            className={cn(navLinkClass(path.startsWith('/jobs/beautify')), 'border border-primary/20')}
-          >
-            美化 PPT
-          </Link>
-          <Link
-            to="/jobs/new"
-            className={cn(navLinkClass(path.startsWith('/jobs/new')), 'border border-primary/20')}
-          >
-            创建
-          </Link>
+        <CreatePptDropdown pathname={path} className="ml-4" />
+        <Link
+          to="/templates"
+          className={cn(navLinkClass(path.startsWith('/templates')), 'ml-4 text-sm')}
+        >
+          模板库
+        </Link>
+        <div className="ml-auto flex items-center gap-2 text-sm">
           {isAdmin() && (
             <Link to="/admin" className={navLinkClass(path.startsWith('/admin'))}>
-              管理后台
+              工作台
             </Link>
           )}
-        </nav>
-        <div className="ml-auto flex items-center gap-2 text-sm">
-          <span className="hidden text-muted-fg sm:inline">{me?.email}</span>
-          <Badge variant="primary">
-            <span aria-hidden>◆</span> {me?.quota_credits ?? 0} credits
-          </Badge>
-          <div className="flex items-center gap-0.5">
-            <MascotToggle />
-            <AppearancePicker />
-            <HeaderIconButton
-              type="button"
-              title="登出"
-              aria-label="登出"
-              onClick={handleLogout}
-            >
-              <IconLogOut />
-            </HeaderIconButton>
-          </div>
+          <MascotToggle />
+          <UserMenu />
         </div>
       </header>
       <main

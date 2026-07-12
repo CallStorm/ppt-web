@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import logging
 
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
 from backend.db.session import SessionLocal
 from backend.models import Job as DbJob
+from backend.models import User
 from backend.paths import uploads_dir_for
 from backend.runner.docker import stop_job_container
 from backend.runtime import state
@@ -36,6 +40,39 @@ def queue_resume(job_id: str, confirm: str) -> None:
             s.commit()
     notify_dispatcher()
 
+
+def prepare_job_retry(s: Session, job: DbJob, user: User) -> str:
+    """Validate, charge 1 credit, and reset a job row for in-place retry.
+
+    Returns owner user_id for post-commit filesystem cleanup.
+    """
+    if job.status not in ("failed", "cancelled", "paused"):
+        raise HTTPException(
+            409,
+            f"job status is {job.status}, can only retry failed/cancelled/stale paused jobs",
+        )
+    if job.status == "paused" and job.session_id:
+        raise HTTPException(
+            409,
+            "任务仍在等待确认，请提交确认或先取消，不能重试",
+        )
+    if not job.user_id:
+        raise HTTPException(400, "job has no owner to charge")
+    owner = s.get(User, job.user_id)
+    if not owner:
+        raise HTTPException(400, "owner user not found")
+    if owner.quota_credits <= 0:
+        raise HTTPException(402, "quota exhausted")
+    owner.quota_credits -= 1
+    job.status = "queued"
+    job.error_message = None
+    job.session_id = None
+    job.pptx_path = None
+    job.cost_usd = 0
+    job.project_dir = None
+    job.pending_confirm = None
+    s.commit()
+    return job.user_id
 
 
 def _collect_upload_paths(user_id: str | None, job_id: str) -> list[str]:
@@ -71,6 +108,9 @@ def cancel_active(job_id: str) -> bool:
         if j and j.status in ("queued", "running"):
             j.status = "cancelled"
             j.error_message = "user cancelled"
+            from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+            sync_template_on_job_terminal(s, j, error_message="user cancelled")
             s.commit()
     _enqueue_event(job_id, "status", {"status": "cancelled"})
     return True

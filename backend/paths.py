@@ -16,6 +16,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 USERS_DIR = DATA_DIR / "users"
+GLOBAL_TEMPLATES_DIR = DATA_DIR / "templates" / "global"
+TEMPLATE_STAGING_DIR = DATA_DIR / "templates" / "staging"
+
+CONTAINER_MOUNT = "/work"
+CONTAINER_STAGING_ROOT = f"{CONTAINER_MOUNT}/template-staging"
+CONTAINER_GLOBAL_TEMPLATES_ROOT = f"{CONTAINER_MOUNT}/global-templates"
+CONTAINER_USER_TEMPLATES_ROOT = f"{CONTAINER_MOUNT}/templates"
 
 # 上传/项目根：保留扩展名，unicode 归一化为 ASCII（解决 macOS NFD vs NFC）。
 # 安全字符集：ASCII 字母数字 + . _ -
@@ -40,6 +47,14 @@ def _safe_token(s: str, max_len: int = 80) -> str:
 
 def user_dir(user_id: str) -> Path:
     return USERS_DIR / user_id
+
+
+def user_templates_dir(user_id: str) -> Path:
+    return user_dir(user_id) / "templates"
+
+
+def global_templates_dir() -> Path:
+    return GLOBAL_TEMPLATES_DIR
 
 
 def uploads_dir_for(user_id: str, job_id: str) -> Path:
@@ -88,3 +103,25 @@ def is_under(child: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def translate_paths_for_container(
+    text: str,
+    user_dir: Path,
+    *,
+    mount_path: str = CONTAINER_MOUNT,
+) -> str:
+    """Replace host data paths in agent prompts with docker bind-mount paths."""
+    user_root = user_dir.resolve()
+    staging_root = f"{mount_path}/template-staging"
+    global_root = f"{mount_path}/global-templates"
+    replacements: list[tuple[str, str]] = [
+        (str(TEMPLATE_STAGING_DIR.resolve()), staging_root),
+        (str(GLOBAL_TEMPLATES_DIR.resolve()), global_root),
+        (str(user_root / "templates"), f"{mount_path}/templates"),
+        (str(user_root), mount_path),
+    ]
+    out = text
+    for host, container in sorted(replacements, key=lambda x: -len(x[0])):
+        out = out.replace(host, container)
+    return out

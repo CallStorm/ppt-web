@@ -69,15 +69,26 @@ def list_slides(project_dir: Path | None) -> list[dict]:
     """
     if not project_dir or not project_dir.exists():
         return []
-    svg_dir = project_dir / "svg_final"
     svg_output_dir = project_dir / "svg_output"
-    if not svg_dir.is_dir():
+    svg_dir = project_dir / "svg_final"
+    if svg_dir.is_dir():
+        refresh_stale_pages(svg_output_dir, svg_dir)
+        svgs = sorted(svg_dir.glob("*.svg"), key=_slide_sort_key)
+        if svg_output_dir.is_dir():
+            final_names = {p.name for p in svgs}
+            extra = [
+                p for p in sorted(svg_output_dir.glob("*.svg"), key=_slide_sort_key)
+                if p.name not in final_names
+            ]
+            if extra:
+                svgs = sorted(svgs + extra, key=_slide_sort_key)
+    elif svg_output_dir.is_dir():
+        svgs = sorted(svg_output_dir.glob("*.svg"), key=_slide_sort_key)
+    else:
         return []
-    refresh_stale_pages(svg_output_dir, svg_dir)
 
     preview_dir = project_dir / ".preview"
     notes_dir = project_dir / "notes"
-    svgs = sorted(svg_dir.glob("*.svg"), key=_slide_sort_key)
 
     out: list[dict] = []
     for pos, svg in enumerate(svgs, start=1):

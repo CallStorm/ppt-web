@@ -6,7 +6,7 @@ import { useAuthStore } from '../stores/authStore'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 import { invalidateJobLists } from '../hooks/useJobs'
 import { TemplateGallery } from '../components/templates/TemplateGallery'
-import type { TemplateCatalogEntry, TemplateUsage } from '../lib/jobOptions'
+import type { TemplateCatalogEntry, TemplateCategory, TemplateUsage } from '../lib/jobOptions'
 
 import { panelClassName } from '../components/ui/Card'
 
@@ -29,11 +29,17 @@ export function BeautifyJobPage() {
 
   const templatesQ = useQuery({
     queryKey: ['templates'],
-    queryFn: () =>
-      api<{ templates: TemplateCatalogEntry[] }>('GET', '/api/templates'),
+    queryFn: async () => {
+      const [tplRes, catRes] = await Promise.all([
+        api<{ templates: TemplateCatalogEntry[] }>('GET', '/api/templates'),
+        api<{ categories: TemplateCategory[] }>('GET', '/api/templates/categories'),
+      ])
+      return { templates: tplRes.templates, categories: catRes.categories }
+    },
   })
 
   const templates = templatesQ.data?.templates ?? []
+  const categories = templatesQ.data?.categories ?? []
 
   const canSubmit = useMemo(
     () => Boolean(file && selected && quota() > 0 && !submitting),
@@ -57,10 +63,11 @@ export function BeautifyJobPage() {
       const fd = new FormData()
       fd.append(
         'prompt',
-        `请基于模板「${selected.id}」美化这份 PPT，保持全部文字与页数不变，仅套用模板视觉样式。`,
+        `请基于模板「${selected.display_name || selected.id}」美化这份 PPT，保持全部文字与页数不变，仅套用模板视觉样式。`,
       )
       if (projectName.trim()) fd.append('project_name', projectName.trim())
       fd.append('job_type', 'beautify')
+      fd.append('template_scope', selected.scope)
       fd.append('template_kind', selected.kind)
       fd.append('template_id', selected.id)
       fd.append('template_usage', templateUsage)
@@ -82,7 +89,7 @@ export function BeautifyJobPage() {
         <Link to="/" className="text-xs text-slate-500 hover:text-gemini-600">
           ← 返回作品列表
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">美化 PPT</h1>
+        <h1 className="mt-2 text-xl font-semibold">PPT 美化</h1>
         <p className="mt-1 text-sm text-slate-500">
           上传现有 PPTX，选择模板套用样式。文字与页数保持不变，仅更换视觉设计。
         </p>
@@ -141,13 +148,22 @@ export function BeautifyJobPage() {
         </section>
 
         <section className={PANEL_CLASS}>
-          <h2 className="text-sm font-medium">② 选择模板</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-medium">② 选择模板</h2>
+            <Link
+              to="/templates"
+              className="text-xs text-gemini-600 hover:underline dark:text-gemini-400"
+            >
+              管理模板 →
+            </Link>
+          </div>
           {templatesQ.isError && (
             <p className="mt-2 text-sm text-rose-600">加载模板失败，请刷新重试</p>
           )}
           <div className="mt-3">
             <TemplateGallery
               templates={templates}
+              categories={categories}
               selected={selected}
               onSelect={setSelected}
               loading={templatesQ.isLoading}
@@ -198,9 +214,11 @@ export function BeautifyJobPage() {
                 <li>
                   模板：
                   <span className="font-medium">
-                    {selected.id}
+                    {selected.display_name || selected.id}
                   </span>
-                  <span className="ml-1 text-xs text-slate-400">({selected.kind})</span>
+                  <span className="ml-1 text-xs text-slate-400">
+                    ({selected.scope}/{selected.kind})
+                  </span>
                 </li>
               </ul>
             ) : (

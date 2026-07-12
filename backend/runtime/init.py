@@ -29,5 +29,8 @@ def cleanup_stuck_jobs() -> int:
             j.status = "failed"
             log.warning("job %s restart-interrupt raw: server restart interrupted", j.id)
             j.error_message = humanize_error("server restart interrupted your previous run")
+            from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+            sync_template_on_job_terminal(s, j)
         s.commit()
         return len(running)

@@ -152,21 +152,30 @@ export function JobCard({
         <div
           className={cn(
             'relative overflow-hidden bg-slate-100 dark:bg-slate-800',
-            compact ? 'min-h-0 flex-1' : coverAspect,
+            compact
+              ? 'flex min-h-0 flex-1 items-center justify-center'
+              : coverAspect,
             styles.cover,
           )}
         >
-          {previewOk ? (
-            <img
-              src={`/api/jobs/${job.id}/preview`}
-              alt={job.project_name || '封面预览'}
-              className="h-full w-full object-cover object-top"
-              loading="lazy"
-              onError={() => setPreviewFailed(true)}
-            />
-          ) : (
-            <CoverPlaceholder status={job.status} id={job.id} />
-          )}
+          <div
+            className={cn(
+              'relative',
+              compact ? 'aspect-video w-full max-h-full' : 'h-full w-full',
+            )}
+          >
+            {previewOk ? (
+              <img
+                src={`/api/jobs/${job.id}/preview`}
+                alt={job.project_name || '封面预览'}
+                className="h-full w-full object-contain"
+                loading="lazy"
+                onError={() => setPreviewFailed(true)}
+              />
+            ) : (
+              <CoverPlaceholder status={job.status} id={job.id} />
+            )}
+          </div>
 
           <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-full bg-white/85 px-1.5 py-1 opacity-0 shadow-sm backdrop-blur transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 dark:bg-slate-900/85">
               {isDone && (

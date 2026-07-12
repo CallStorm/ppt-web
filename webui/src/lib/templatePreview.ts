@@ -1,7 +1,9 @@
 import type { TemplateCatalogEntry } from './jobOptions'
 
 export function templatePreviewUrl(entry: TemplateCatalogEntry, svgName: string): string {
-  return `/api/templates/${entry.kind}/${encodeURIComponent(entry.id)}/preview/${encodeURIComponent(svgName)}`
+  const scope = entry.scope || 'system'
+  const id = entry.id || entry.slug || ''
+  return `/api/templates/${scope}/${entry.kind}/${encodeURIComponent(id)}/preview/${encodeURIComponent(svgName)}`
 }
 
 export function templateSlideLabel(svgName: string): string {
@@ -19,4 +21,10 @@ export function templatePreviewSlides(entry: TemplateCatalogEntry): string[] {
   if (entry.preview_slides.length > 0) return entry.preview_slides
   if (entry.cover_svg) return [entry.cover_svg]
   return []
+}
+
+export const SCOPE_LABELS: Record<string, string> = {
+  system: '内置',
+  global: '全局',
+  user: '我的',
 }

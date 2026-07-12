@@ -156,3 +156,15 @@ def migrate_v7_to_v8() -> bool:
     log.warning("migrating DB v7 -> v8 (creating conversations + messages)")
     init_db()
     return True
+
+
+def migrate_v8_to_v9() -> bool:
+    """Create template_categories + templates tables for beautify template management."""
+    if not _has_users_table():
+        return False
+    insp = inspect(engine)
+    if insp.has_table("template_categories") and insp.has_table("templates"):
+        return False
+    log.warning("migrating DB v8 -> v9 (creating template_categories + templates)")
+    init_db()
+    return True

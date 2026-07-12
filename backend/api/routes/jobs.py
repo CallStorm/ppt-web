@@ -24,13 +24,14 @@ from backend.api.schemas.job_options import (
     RevisionRequest,
     job_options_from_form,
 )
-from backend.app.templates import resolve_global_template_path
+from backend.app.templates import resolve_container_template_path
 from backend.auth import CurrentUser
 from backend.db.session import SessionLocal
 from backend.models import Event, Job, User
 from sqlalchemy import func, or_
 from backend.paths import ensure_data_dirs, is_under, project_root_for, safe_stage_name, uploads_dir_for
 from backend.runner.preview import find_cover_preview, list_slides
+from backend.runtime.jobs import prepare_job_retry
 from backend.runtime import (
     cancel_active,
     is_active,
@@ -45,6 +46,17 @@ log = logging.getLogger("backend.api.jobs")
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024
+
+
+def _exclude_template_create_jobs(query):
+    """Portfolio list excludes template library creation jobs."""
+    return query.filter(
+        or_(
+            Job.options_json.is_(None),
+            Job.options_json == "",
+            ~Job.options_json.like('%"job_type": "template_create"%'),
+        )
+    )
 
 
 def _apply_job_list_filters(query, status: str | None, q: str | None):
@@ -77,6 +89,7 @@ async def create_job(
     job_type: Annotated[str, Form()] = "generate",
     template_kind: Annotated[str | None, Form()] = None,
     template_id: Annotated[str | None, Form()] = None,
+    template_scope: Annotated[str | None, Form()] = None,
     template_usage: Annotated[str, Form()] = "adaptive",
     language: Annotated[str, Form()] = "zh",
     scenario: Annotated[str, Form()] = "general",
@@ -110,6 +123,7 @@ async def create_job(
     try:
         opts = job_options_from_form(
             job_type=job_type,
+            template_scope=template_scope,
             template_kind=template_kind,
             template_id=template_id,
             template_usage=template_usage,
@@ -139,7 +153,12 @@ async def create_job(
         raise HTTPException(422, detail=str(e)) from e
 
     if opts.job_type == "beautify" and opts.template is not None:
-        resolve_global_template_path(opts.template.kind, opts.template.id)
+        from backend.app.template_service import _assert_template_access  # noqa: PLC0415
+
+        with SessionLocal() as s:
+            _assert_template_access(
+                s, user, opts.template.scope, opts.template.kind, opts.template.id
+            )
 
     job_id = str(uuid.uuid4())
     pname = (project_name or f"web_{job_id[:8]}").strip()[:64]
@@ -249,6 +268,7 @@ async def list_jobs(
 ) -> dict:
     with SessionLocal() as s:
         query = s.query(Job).filter(Job.user_id == user.id)
+        query = _exclude_template_create_jobs(query)
         query = _apply_job_list_filters(query, status, q)
         total = query.count()
         rows = (
@@ -269,8 +289,9 @@ async def list_jobs(
 async def job_stats(user: CurrentUser) -> dict:
     with SessionLocal() as s:
         rows = (
-            s.query(Job.status, func.count())
+            _exclude_template_create_jobs(s.query(Job))
             .filter(Job.user_id == user.id)
+            .with_entities(Job.status, func.count())
             .group_by(Job.status)
             .all()
         )
@@ -346,32 +367,12 @@ async def retry_job_endpoint(job_id: str, user: CurrentUser) -> dict:
     with SessionLocal() as s:
         j = get_job_or_404(s, job_id)
         require_owner_or_admin(j, user)
-        if j.status not in ("failed", "cancelled", "paused"):
-            raise HTTPException(
-                409, f"job status is {j.status}, can only retry failed/cancelled/stale paused jobs"
-            )
-        if j.status == "paused" and j.session_id:
-            raise HTTPException(
-                409, "任务仍在等待确认，请提交确认或先取消，不能重试",
-            )
         if not j.user_id:
             raise HTTPException(400, "job has no owner to charge")
         u = s.get(User, j.user_id)
         if not u:
             raise HTTPException(400, "owner user not found")
-        if u.quota_credits <= 0:
-            raise HTTPException(402, "quota exhausted")
-        # 重新计费 + 复位行
-        u.quota_credits -= 1
-        j.status = "queued"
-        j.error_message = None
-        j.session_id = None
-        j.pptx_path = None
-        j.cost_usd = 0
-        j.project_dir = None
-        j.pending_confirm = None
-        s.commit()
-        owner_id = j.user_id
+        owner_id = prepare_job_retry(s, j, u)
 
     # 清旧产物（runner 重新 mkdir）。uploads 目录不动——复用原上传文件。
     if owner_id:
@@ -395,6 +396,9 @@ async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
             if j2.status == "queued":
                 j2.status = "cancelled"
                 j2.error_message = "user cancelled"
+                from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+                sync_template_on_job_terminal(s, j2, error_message="user cancelled")
                 s.commit()
         return {"id": job_id, "status": "cancelled"}
     if j.status == "paused" and not is_active(job_id):
@@ -404,6 +408,9 @@ async def cancel_job_endpoint(job_id: str, user: CurrentUser) -> dict:
             if j2.status == "paused":
                 j2.status = "cancelled"
                 j2.error_message = j2.error_message or "user cancelled"
+                from backend.app.template_service import sync_template_on_job_terminal  # noqa: PLC0415
+
+                sync_template_on_job_terminal(s, j2, error_message="user cancelled")
                 s.commit()
         return {"id": job_id, "status": "cancelled"}
     if not is_active(job_id):

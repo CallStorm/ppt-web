@@ -9,10 +9,39 @@ from typing import Callable
 from backend.api.schemas.job_options import JobOptions, parse_job_options
 from backend.runner.claude import stream_claude
 from backend.runner.constants import AUTO_CONFIRM_TEXT, SKIP_EIGHT_CONFIRM_MAX
-from backend.runner.stages import _project_snapshot, find_pptx, resolve_project_dir, build_initial_prompt
+from backend.runner.stages import (
+    _combined_snapshot,
+    _project_snapshot,
+    beautify_output_ready,
+    find_pptx,
+    resolve_project_dir,
+    build_initial_prompt,
+    template_watch_roots,
+)
 from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runner.sync")
+
+# stop_reason values that mean "agent paused normally; safe to resume".
+STOP_OK = ("end_turn", None)
+
+
+def normalize_stop_reason(raw, *, terminal_reason=None) -> str | None:
+    """Third-party APIs (MiniMax etc.) may return None or '' instead of 'end_turn'."""
+    if raw in ("", None):
+        if terminal_reason is not None:
+            log.debug(
+                "normalized empty stop_reason (terminal_reason=%r) to None",
+                terminal_reason,
+            )
+        return None
+    return raw
+
+
+def _stop_reason_from_result(result: dict) -> str | None:
+    """Extract and normalize stop_reason from a Claude stream-json result event."""
+    raw = result.get("stop_reason", "end_turn")
+    return normalize_stop_reason(raw, terminal_reason=result.get("terminal_reason"))
 
 
 def _humanize_run_error(raw: str | None, job_id: str | None) -> str | None:
@@ -20,6 +49,66 @@ def _humanize_run_error(raw: str | None, job_id: str | None) -> str | None:
     if raw:
         log.warning("job %s failed raw error: %s", job_id, raw)
     return humanize_error(raw)
+
+
+def _resolve_pptx(
+    project_root: Path,
+    project_name: str,
+    project_dir: Path | None,
+    options: JobOptions | None,
+) -> tuple[Path | None, str | None]:
+    """Find export PPTX and apply beautify completion rules."""
+    is_beautify = options is not None and options.job_type == "beautify"
+    pptx = find_pptx(
+        project_root,
+        project_name=project_name,
+        beautify=is_beautify,
+    )
+    if not is_beautify:
+        return pptx, None
+    if not pptx:
+        return None, "no exported pptx in exports/"
+    ready, err = beautify_output_ready(project_dir)
+    if ready:
+        return pptx, None
+    return None, err or "beautify output incomplete"
+
+
+def _finalize_status(
+    *,
+    pptx: Path | None,
+    pptx_error: str | None,
+    options: JobOptions | None,
+    stop_reason,
+    session_id,
+    no_progress_bail: bool,
+    last_text: str | None = None,
+) -> tuple[str, Path | None, str | None, bool]:
+    """Return (status, pptx_path, error_message, refund)."""
+    is_template_create = options is not None and options.job_type == "template_create"
+
+    if pptx_error:
+        return "failed", None, pptx_error, no_progress_bail
+    if pptx:
+        return "done", pptx, None, False
+    if is_template_create and options is not None:
+        from backend.app.template_service import template_output_ready  # noqa: PLC0415
+
+        if template_output_ready(options.template_record_id, None):
+            return "done", None, None, False
+        return "failed", None, "template output incomplete", no_progress_bail
+    if no_progress_bail:
+        return (
+            "failed",
+            None,
+            "auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated",
+            True,
+        )
+    if stop_reason in STOP_OK and session_id:
+        return "paused", None, None, False
+    if stop_reason in STOP_OK and not session_id:
+        return "failed", None, "session lost: cannot resume confirmation", False
+    return "failed", None, f"stop_reason={stop_reason}", no_progress_bail
 
 
 def run_sync(
@@ -96,23 +185,43 @@ def run_sync(
 
     # 找产物（per-user project_root）
     project_dir = resolve_project_dir(project_name, root=project_root)
-    pptx = find_pptx(project_root)
+    pptx, pptx_error = _resolve_pptx(project_root, project_name, project_dir, options)
     cost = result.get("total_cost_usd")
-    stop_reason = result.get("stop_reason", "end_turn")
+    # 兼容第三方 API（minimaxi 等）：官方返回 "end_turn"，代理可能返回 None 或 ""。
+    stop_reason = _stop_reason_from_result(result)
 
     # 八点确认已禁用，永远自动跳过（兜底：如果 agent 还是停下等用户，auto-resume 让它继续）
-    effective_skip = True
-    # 兼容第三方 API（minimaxi 等）的 stop_reason 行为：agent 主动停下等用户时
-    # 官方 anthropic 返回 "end_turn"，但有些代理返回 None。一律当"主动停下"处理。
-    STOP_OK = ("end_turn", None)
     no_progress_bail = False  # agent 没产生新文件 → bail，触发 refund
-    if not pptx and stop_reason in STOP_OK and session_id:
-        prev_snapshot = _project_snapshot(project_root)
+    is_template_create = options is not None and options.job_type == "template_create"
+
+    def _template_done(_text: str | None = None) -> bool:
+        if not is_template_create or options is None:
+            return False
+        from backend.app.template_service import template_output_ready  # noqa: PLC0415
+
+        return template_output_ready(options.template_record_id, None)
+
+    def _take_snapshot() -> tuple:
+        if is_template_create:
+            return _combined_snapshot(*template_watch_roots(options, project_root))
+        return _project_snapshot(project_root)
+
+    template_already_ready = _template_done() if is_template_create else False
+
+    if (
+        not template_already_ready
+        and not pptx
+        and stop_reason in STOP_OK
+        and session_id
+        and not _template_done(last_text)
+    ):
+        prev_snapshot = _take_snapshot()
         auto_round = 0
         while (
             not pptx
             and stop_reason in STOP_OK
             and auto_round < SKIP_EIGHT_CONFIRM_MAX
+            and not _template_done(last_text)
         ):
             if cancel_event is not None and cancel_event.is_set():
                 break
@@ -161,14 +270,18 @@ def run_sync(
             last_text = resume_result.get("_last_assistant_text") or last_text
             cost = (cost or 0) + (resume_result.get("total_cost_usd") or 0)
             session_id = resume_result.get("session_id") or session_id
-            stop_reason = resume_result.get("stop_reason", "end_turn")
-            pptx = find_pptx(project_root)
+            stop_reason = _stop_reason_from_result(resume_result)
+            pptx, pptx_error = _resolve_pptx(
+                project_root, project_name, project_dir, options,
+            )
             project_dir = resolve_project_dir(project_name, root=project_root) or project_dir
 
+            if _template_done(last_text):
+                break
+
             # 进展检测：snapshot 完全没变 + 仍然没 pptx → agent 在空转 / 撒谎。
-            # 实测过：claude agent 把路径里的 user_id UUID 截断一位，然后说"导出完成 69KB"，
-            # 反复 3 轮 auto-resume 烧掉 ~$1.14 才认命。snapshot 不变 = 必 bail。
-            new_snapshot = _project_snapshot(project_root)
+            # template_create 同时监控 storage_path / staging，避免误 bail。
+            new_snapshot = _take_snapshot()
             if not pptx and new_snapshot == prev_snapshot:
                 no_progress_bail = True
                 log.warning(
@@ -186,21 +299,15 @@ def run_sync(
             auto_round, bool(pptx), stop_reason,
         )
 
-    if pptx:
-        status = "done"
-    elif no_progress_bail:
-        # auto-resume 检测到 snapshot 完全没变 → agent 在空转 / 撒谎。
-        # 标 failed + 触发 refund（不是用户 prompt 的问题，是 server 没识别出 agent 异常）
-        status = "failed"
-    elif stop_reason in STOP_OK and session_id:
-        # agent 主动停下但还没出 pptx = 暂停等确认（必须有 session 才能 resume）
-        status = "paused"
-    elif stop_reason in STOP_OK:
-        status = "failed"
-    else:
-        status = "failed"
-
-    orphan_paused = status == "failed" and stop_reason in STOP_OK and not session_id
+    status, pptx, pptx_error, refund = _finalize_status(
+        pptx=pptx,
+        pptx_error=pptx_error,
+        options=options,
+        stop_reason=stop_reason,
+        session_id=session_id,
+        no_progress_bail=no_progress_bail,
+        last_text=last_text,
+    )
 
     final = {
         "status": status,
@@ -209,16 +316,9 @@ def run_sync(
         "pptx_path": str(pptx) if pptx else None,
         "cost_usd": cost,
         "last_agent_text": last_text,
-        "error_message": _humanize_run_error(
-            None if status != "failed" else
-            ("session lost: cannot resume confirmation"
-             if orphan_paused else
-             ("auto-resume bailed: no file changes after multiple rounds; agent likely hallucinated"
-              if no_progress_bail else f"stop_reason={stop_reason}")),
-            job_id,
-        ),
+        "error_message": _humanize_run_error(pptx_error, job_id),
         # run_job 看这个标志决定是否 refund credit
-        "refund": no_progress_bail,
+        "refund": refund,
     }
     on_event({"kind": "status", "status": status})
     return final
@@ -234,6 +334,7 @@ def resume_sync(
     cancel_event: threading.Event | None = None,
     proc_holder: list | None = None,
     job_id: str | None = None,
+    options: JobOptions | None = None,
 ) -> dict:
     """注入用户确认继续 `--resume <session_id>`。返回同 run_sync。
 
@@ -281,17 +382,22 @@ def resume_sync(
 
     last_text = result.get("_last_assistant_text", "")
     cost = result.get("total_cost_usd")
-    stop_reason = result.get("stop_reason", "end_turn")
-    # 找产物：用 run 时已经记下的 project_root（per-user 隔离）
+    stop_reason = _stop_reason_from_result(result)
     project_dir = resolve_project_dir(project_name, root=project_root)
-    pptx = find_pptx(project_root)
+    pptx, pptx_error = _resolve_pptx(project_root, project_name, project_dir, options)
 
-    if pptx:
+    if pptx_error:
+        status = "failed"
+        error_message = pptx_error
+    elif pptx:
         status = "done"
-    elif stop_reason in ("end_turn", None):
+        error_message = None
+    elif stop_reason in STOP_OK:
         status = "paused"
+        error_message = None
     else:
         status = "failed"
+        error_message = f"stop_reason={stop_reason}"
 
     final = {
         "status": status,
@@ -300,9 +406,7 @@ def resume_sync(
         "pptx_path": str(pptx) if pptx else None,
         "cost_usd": cost,
         "last_agent_text": last_text,
-        "error_message": _humanize_run_error(
-            None if status != "failed" else f"stop_reason={stop_reason}", job_id,
-        ),
+        "error_message": _humanize_run_error(error_message, job_id),
     }
     on_event({"kind": "status", "status": status})
     return final
