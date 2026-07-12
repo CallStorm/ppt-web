@@ -89,7 +89,7 @@ export function BeautifyJobPage() {
         <Link to="/" className="text-xs text-slate-500 hover:text-gemini-600">
           ← 返回作品列表
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">美化 PPT</h1>
+        <h1 className="mt-2 text-xl font-semibold">PPT 美化</h1>
         <p className="mt-1 text-sm text-slate-500">
           上传现有 PPTX，选择模板套用样式。文字与页数保持不变，仅更换视觉设计。
         </p>

@@ -22,6 +22,27 @@ from backend.runner.errors import humanize_error
 
 log = logging.getLogger("backend.runner.sync")
 
+# stop_reason values that mean "agent paused normally; safe to resume".
+STOP_OK = ("end_turn", None)
+
+
+def normalize_stop_reason(raw, *, terminal_reason=None) -> str | None:
+    """Third-party APIs (MiniMax etc.) may return None or '' instead of 'end_turn'."""
+    if raw in ("", None):
+        if terminal_reason is not None:
+            log.debug(
+                "normalized empty stop_reason (terminal_reason=%r) to None",
+                terminal_reason,
+            )
+        return None
+    return raw
+
+
+def _stop_reason_from_result(result: dict) -> str | None:
+    """Extract and normalize stop_reason from a Claude stream-json result event."""
+    raw = result.get("stop_reason", "end_turn")
+    return normalize_stop_reason(raw, terminal_reason=result.get("terminal_reason"))
+
 
 def _humanize_run_error(raw: str | None, job_id: str | None) -> str | None:
     """Log the raw error with job_id, return the humanized version."""
@@ -65,7 +86,6 @@ def _finalize_status(
 ) -> tuple[str, Path | None, str | None, bool]:
     """Return (status, pptx_path, error_message, refund)."""
     is_template_create = options is not None and options.job_type == "template_create"
-    STOP_OK = ("end_turn", None)
 
     if pptx_error:
         return "failed", None, pptx_error, no_progress_bail
@@ -167,13 +187,10 @@ def run_sync(
     project_dir = resolve_project_dir(project_name, root=project_root)
     pptx, pptx_error = _resolve_pptx(project_root, project_name, project_dir, options)
     cost = result.get("total_cost_usd")
-    stop_reason = result.get("stop_reason", "end_turn")
+    # 兼容第三方 API（minimaxi 等）：官方返回 "end_turn"，代理可能返回 None 或 ""。
+    stop_reason = _stop_reason_from_result(result)
 
     # 八点确认已禁用，永远自动跳过（兜底：如果 agent 还是停下等用户，auto-resume 让它继续）
-    effective_skip = True
-    # 兼容第三方 API（minimaxi 等）的 stop_reason 行为：agent 主动停下等用户时
-    # 官方 anthropic 返回 "end_turn"，但有些代理返回 None。一律当"主动停下"处理。
-    STOP_OK = ("end_turn", None)
     no_progress_bail = False  # agent 没产生新文件 → bail，触发 refund
     is_template_create = options is not None and options.job_type == "template_create"
 
@@ -253,7 +270,7 @@ def run_sync(
             last_text = resume_result.get("_last_assistant_text") or last_text
             cost = (cost or 0) + (resume_result.get("total_cost_usd") or 0)
             session_id = resume_result.get("session_id") or session_id
-            stop_reason = resume_result.get("stop_reason", "end_turn")
+            stop_reason = _stop_reason_from_result(resume_result)
             pptx, pptx_error = _resolve_pptx(
                 project_root, project_name, project_dir, options,
             )
@@ -365,7 +382,7 @@ def resume_sync(
 
     last_text = result.get("_last_assistant_text", "")
     cost = result.get("total_cost_usd")
-    stop_reason = result.get("stop_reason", "end_turn")
+    stop_reason = _stop_reason_from_result(result)
     project_dir = resolve_project_dir(project_name, root=project_root)
     pptx, pptx_error = _resolve_pptx(project_root, project_name, project_dir, options)
 
@@ -375,7 +392,7 @@ def resume_sync(
     elif pptx:
         status = "done"
         error_message = None
-    elif stop_reason in ("end_turn", None):
+    elif stop_reason in STOP_OK:
         status = "paused"
         error_message = None
     else:

@@ -32,11 +32,16 @@ export function SkeletonCard({
     >
       <div
         className={cn(
-          'skeleton-shimmer',
-          compact ? 'min-h-0 flex-1' : coverAspect,
+          compact
+            ? 'flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-100 dark:bg-slate-800'
+            : cn('skeleton-shimmer', coverAspect),
           s.cover,
         )}
-      />
+      >
+        {compact && (
+          <div className="skeleton-shimmer aspect-video w-full max-h-full" />
+        )}
+      </div>
       <div className={cn(s.body, compact && 'shrink-0')}>
         <div className={cn('skeleton-shimmer w-2/3 rounded', s.line)} />
         <div className={cn('skeleton-shimmer mt-1.5 w-1/2 rounded', s.line)} />

@@ -26,7 +26,7 @@ export function cardSizeForWidth(width: number): JobCardSize {
 export const JOB_GRID_SIDE_PADDING =
   'px-16 sm:px-24 md:px-28 lg:px-32 xl:px-40 2xl:px-44'
 
-export const COVER_ASPECT_CLASS: CoverAspect = 'aspect-[4/3]'
+export const COVER_ASPECT_CLASS: CoverAspect = 'aspect-video'
 
 export function useJobGridLayout() {
   const [cardSize, setCardSize] = useState<JobCardSize>(() =>

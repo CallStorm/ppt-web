@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { JobCard } from '../components/jobs/JobCard'
 import { SkeletonCard } from '../components/jobs/SkeletonCard'
 import {
@@ -17,6 +16,7 @@ import type { Job } from '../api/types'
 import { truncate } from '../lib/format'
 import { resetMainScroll } from '../lib/scrollMain'
 import { PageShell } from '../components/ui/PageShell'
+import { CreatePptDropdown } from '../components/layout/CreatePptDropdown'
 import { Input } from '../components/ui/Input'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
@@ -248,21 +248,10 @@ export function DashboardPage() {
               {!hasAnyJobs ? (
                 <>
                   <p className="mt-2 max-w-sm text-xs text-slate-400">
-                    上传文档或输入主题，AI 将自动生成演示文稿。
+                    点击「新建 PPT」选择制作方式。
                   </p>
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    <Link
-                      to="/jobs/new"
-                      className="rounded-md bg-gemini-600 px-4 py-2 text-sm font-medium text-white hover:bg-gemini-700"
-                    >
-                      创建
-                    </Link>
-                    <Link
-                      to="/jobs/beautify"
-                      className="rounded-md border border-gemini-200 px-4 py-2 text-sm font-medium text-gemini-700 hover:bg-gemini-50 dark:border-gemini-800 dark:text-gemini-200"
-                    >
-                      美化 PPT
-                    </Link>
+                  <div className="mt-4 flex justify-center">
+                    <CreatePptDropdown pathname="" variant="hero" />
                   </div>
                 </>
               ) : hasActiveFilter ? (

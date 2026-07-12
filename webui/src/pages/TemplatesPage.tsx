@@ -13,7 +13,6 @@ import {
 import { Tabs } from '../components/ui/Tabs'
 import { useRetryTemplateTask, useTemplateTasks } from '../hooks/useTemplateTasks'
 import type { TemplateCatalogEntry, TemplateCategory } from '../lib/jobOptions'
-import { SCOPE_LABELS } from '../lib/templatePreview'
 import type { TemplateTask } from '../lib/templateTasks'
 import { panelClassName } from '../components/ui/Card'
 
@@ -44,7 +43,6 @@ export function TemplatesPage() {
   const templates = q.data?.templates ?? []
   const categories = q.data?.categories ?? []
   const tasks = tasksQ.data?.tasks ?? []
-  const systemTemplates = templates.filter((t) => t.scope === 'system')
 
   const pageTabs = useMemo(
     () => [
@@ -62,16 +60,6 @@ export function TemplatesPage() {
       setSearchParams({ tab: 'tasks' })
     } else {
       setSearchParams({})
-    }
-  }
-
-  const forkTemplate = async (entry: TemplateCatalogEntry) => {
-    try {
-      await api('POST', `/api/templates/fork/${entry.kind}/${encodeURIComponent(entry.id)}`)
-      notifySuccess('已复制为我的模板')
-      qc.invalidateQueries({ queryKey: ['templates'] })
-    } catch (e) {
-      notifyError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -133,49 +121,18 @@ export function TemplatesPage() {
       <Tabs tabs={pageTabs} active={activeTab} onChange={setTab} className="mb-4" />
 
       {activeTab === 'library' && (
-        <>
-          <section className={panelClassName}>
-            <TemplateGallery
-              templates={templates}
-              categories={categories}
-              selected={null}
-              onSelect={() => {}}
-              onDelete={deleteTemplate}
-              deletingId={deletingId}
-              isAdmin={isAdmin()}
-              loading={q.isLoading}
-            />
-          </section>
-
-          {systemTemplates.length > 0 && (
-            <section className={`mt-6 ${panelClassName}`}>
-              <h2 className="text-sm font-medium">从系统内置复制</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                将内置模板复制到「我的模板」后可自行调整（复制为独立副本）。
-              </p>
-              <ul className="mt-3 space-y-2 text-sm">
-                {systemTemplates.slice(0, 8).map((t) => (
-                  <li
-                    key={`${t.kind}:${t.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2 dark:border-slate-700"
-                  >
-                    <span>
-                      {t.display_name || t.id}
-                      <span className="ml-2 text-xs text-slate-400">{SCOPE_LABELS[t.scope]}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => forkTemplate(t)}
-                      className="text-xs text-gemini-600 hover:underline"
-                    >
-                      复制为我的模板
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </>
+        <section className={panelClassName}>
+          <TemplateGallery
+            templates={templates}
+            categories={categories}
+            selected={null}
+            onSelect={() => {}}
+            onDelete={deleteTemplate}
+            deletingId={deletingId}
+            isAdmin={isAdmin()}
+            loading={q.isLoading}
+          />
+        </section>
       )}
 
       {activeTab === 'tasks' && (

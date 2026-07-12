@@ -16,7 +16,7 @@ import { MascotProgress } from './MascotProgress'
 
 const IDLE_SPEECH = [
   '我是 ForgeBot，\n随时帮你做 PPT～',
-  '想创作？\n点上方「创建」\n或「对话创作」',
+  '想创作？\n点上方 + 新建 PPT\n选择制作方式',
   '有任务在跑时，\n我会在这里报进度',
 ]
 
