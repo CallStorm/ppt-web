@@ -7,7 +7,7 @@ interface ExternalLoginPayload {
   password: string
 }
 
-const ACCOUNT_SUFFIX = '@sjsk'
+const ACCOUNT_SUFFIX = '@sjsk.com'
 
 function stripCodeParam() {
   const url = new URL(window.location.href)
